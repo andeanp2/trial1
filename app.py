@@ -46,23 +46,30 @@ def cashier_ui():
         btn_beli = st.form_submit_button("Proses Transaksi")
         
         if btn_beli:
-            # Cek Stok
+            # 1. Ambil data stok dan harga dari dataframe yang sudah di-load
             stok_skrg = df_produk[df_produk['nama_produk'] == item]['stok'].values[0]
             harga_satuan = df_produk[df_produk['nama_produk'] == item]['harga'].values[0]
             
             if stok_skrg >= jumlah:
                 total = harga_satuan * jumlah
-                # 1. Update Stok
-                con.execute("UPDATE produk SET stok = stok - ? WHERE nama_produk = ?", [jumlah, item])
-                # Masukkan waktu dari Python saja agar lebih pasti
+                
+                # --- BARIS YANG TADI HILANG ---
+                id_tx = datetime.now().strftime("%Y%m%d%H%M%S") # Membuat ID unik berdasarkan waktu
                 waktu_sekarang = datetime.now()
+                # ------------------------------
 
-                # Gunakan nama kolom secara spesifik (Explicit Insert)
+                # 2. Update Stok di database
+                con.execute("UPDATE produk SET stok = stok - ? WHERE nama_produk = ?", [jumlah, item])
+                
+                # 3. Catat Transaksi dengan kolom yang jelas (Explicit)
                 con.execute("""
                     INSERT INTO transaksi (id_transaksi, nama_produk, jumlah, total_harga, kasir, waktu) 
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, [id_tx, item, jumlah, total, st.session_state.username, waktu_sekarang])
+                
                 st.success(f"Transaksi Berhasil! Total: Rp{total:,.0f}")
+                st.balloons() # Biar lebih seru!
+                st.rerun()    # Segarkan halaman untuk update tabel stok
             else:
                 st.error("Maaf, Stok tidak mencukupi!")
 
