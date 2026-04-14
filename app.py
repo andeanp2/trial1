@@ -2,17 +2,17 @@ import streamlit as st
 import duckdb
 import pandas as pd
 import pytz 
+import plotly.express as px
 from datetime import datetime
 
-# Fungsi untuk mendapatkan waktu WIB sekarang
+# --- KONFIGURASI HALAMAN ---
+st.set_page_config(page_title="Sistem Kasir Pro v1", layout="wide", page_icon="🛒")
+
+# --- FUNGSI HELPER ---
 def get_wib_now():
     tz_wib = pytz.timezone('Asia/Jakarta')
     return datetime.now(tz_wib)
 
-# --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v1", layout="wide")
-
-# --- KONEKSI DATABASE ---
 @st.cache_resource
 def get_connection():
     TOKEN = st.secrets["MOTHERDUCK_TOKEN"]
@@ -20,268 +20,194 @@ def get_connection():
 
 con = get_connection()
 
-# --- FUNGSI LOGIN ---
+# --- INISIALISASI DATABASE ---
+def init_db():
+    con.execute("CREATE TABLE IF NOT EXISTS produk (id INTEGER PRIMARY KEY, nama_produk VARCHAR, harga DOUBLE, stok INTEGER, terakhir_diupdate TIMESTAMP)")
+    con.execute("CREATE TABLE IF NOT EXISTS transaksi (id_transaksi VARCHAR, kasir VARCHAR, waktu TIMESTAMP, nama_produk VARCHAR, jumlah INTEGER, harga_satuan DOUBLE, total_harga DOUBLE)")
+    con.execute("CREATE TABLE IF NOT EXISTS users (username VARCHAR PRIMARY KEY, password VARCHAR, role VARCHAR)")
+    
+    con.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin')")
+    con.execute("INSERT OR IGNORE INTO users VALUES ('kasir1', '123', 'kasir')")
+
+init_db()
+
+# Session State Handling
+if "cart" not in st.session_state:
+    st.session_state.cart = []
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+# --- UI LOGIN ---
 def login_ui():
     st.title("🔐 Login Sistem Kasir")
-    with st.form("login_form"):
-        user = st.text_input("Username")
-        pw = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Login")
-        
-        if submit:
-            res = con.execute("SELECT role FROM users WHERE username = ? AND password = ?", [user, pw]).fetchone()
-            if res:
-                st.session_state.logged_in = True
-                st.session_state.username = user
-                st.session_state.role = res[0]
-                st.rerun()
-            else:
-                st.error("Username atau Password salah!")
+    with st.container(border=True):
+        col1, _ = st.columns([1, 1])
+        with col1:
+            user = st.text_input("Username")
+            pw = st.text_input("Password", type="password")
+            if st.button("Login", use_container_width=True):
+                res = con.execute("SELECT role FROM users WHERE username = ? AND password = ?", [user, pw]).fetchone()
+                if res:
+                    st.session_state.logged_in = True
+                    st.session_state.username = user
+                    st.session_state.role = res[0]
+                    st.rerun()
+                else:
+                    st.error("Username atau Password salah!")
 
-# --- HALAMAN KASIR (INPUT TRANSAKSI) ---
+# --- UI KASIR ---
 def cashier_ui():
     st.header(f"🛒 Kasir: {st.session_state.username}")
     
-    if "cart" not in st.session_state:
-        st.session_state.cart = []
-
-    df_produk = con.execute("SELECT * FROM produk").df()
+    df_produk = con.execute("SELECT id, nama_produk, harga, stok FROM produk WHERE stok > 0").df()
+    if df_produk.empty:
+        st.warning("Data produk kosong atau stok habis. Hubungi Admin.")
+        return
 
     col_input, col_cart = st.columns([1, 2])
-
+    
     with col_input:
         st.subheader("Pilih Barang")
         with st.form("form_add_to_cart", clear_on_submit=True):
-            item_pilih = st.selectbox("Produk", df_produk['nama_produk'])
+            item_pilih = st.selectbox("Produk", df_produk['nama_produk'].tolist())
             qty_pilih = st.number_input("Jumlah", min_value=1, step=1)
-            btn_add = st.form_submit_button("➕ Tambah")
-
-            if btn_add:
-                print(f"DEBUG: Harga={produk_data['harga']}, Qty={qty_pilih}, Subtotal={qty_pilih * produk_data['harga']}")
-                row = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
-                if int(row['stok']) >= qty_pilih:
+            if st.form_submit_button("➕ Tambah ke Keranjang"):
+                produk_data = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
+                if produk_data['stok'] >= qty_pilih:
                     st.session_state.cart.append({
                         "id": int(produk_data['id']),
                         "nama": item_pilih,
                         "harga": float(produk_data['harga']),
                         "qty": int(qty_pilih),
-                        "subtotal": float(produk_data['harga']) # <--- Pastikan namanya "subtotal"
+                        "subtotal": float(qty_pilih * produk_data['harga'])
                     })
-                    st.toast(f"{item_pilih} ditambah!")
+                    st.rerun()
                 else:
-                    st.error("Stok habis!")
+                    st.error("Stok tidak cukup!")
 
     with col_cart:
         st.subheader("Isi Keranjang")
         if st.session_state.cart:
-            # --- TAMPILAN KERANJANG INTERAKTIF ---
-            total_bayar = 0
+            total_bayar = sum(item.get('subtotal', 0) for item in st.session_state.cart)
             for i, barang in enumerate(st.session_state.cart):
-                c1, c2, c3 = st.columns([3, 2, 1])
-                c1.write(f"**{barang['nama']}** \n{barang['qty']} x Rp{barang['harga']:,.0f}")
-                c2.write(f"  \nRp{barang.get('subtotal', 0):,.0f}")
-                # Tombol hapus spesifik per baris
-                if c3.button("🗑️", key=f"del_{i}"):
-                    st.session_state.cart.pop(i)
-                    st.rerun()
-                total_bayar += barang['subtotal']
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([3, 2, 1])
+                    c1.write(f"**{barang['nama']}**")
+                    c1.caption(f"{barang['qty']} x Rp{barang['harga']:,.0f}")
+                    c2.write(f"Rp{barang.get('subtotal', 0):,.0f}") 
+                    if c3.button("🗑️", key=f"del_{i}"):
+                        st.session_state.cart.pop(i)
+                        st.rerun()
             
             st.divider()
             st.write(f"### TOTAL: Rp{total_bayar:,.0f}")
-            
-            c1, c2 = st.columns(2)
-            if c1.button("🧹 Kosongkan"):
-                st.session_state.cart = []
-                st.rerun()
-
-            if c2.button("✅ PROSES TRANSAKSI"):
-                wib_now = get_wib_now() # Ambil jam Jakarta
-                id_tx = wib_now.strftime("%Y%m%d%H%M%S")
-                waktu_str = wib_now.strftime("%Y-%m-%d %H:%M:%S")
-                tgl_hari_ini = wib_now.strftime("%Y-%m-%d") # Untuk filter history nanti
-                for b in st.session_state.cart:
-                    con.execute("UPDATE produk SET stok = stok - ? WHERE nama_produk = ?", [b['qty'], b['nama']])
-                    con.execute("""
-                        INSERT INTO transaksi (id_transaksi, nama_produk, jumlah, total_harga, kasir, waktu) 
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, [id_tx, b['nama'], b['qty'], b['subtotal'], str(st.session_state.username), waktu_str])
-                
-                st.success("Transaksi Berhasil!")
-                st.session_state.cart = []
-                st.rerun()
+            if st.button("✅ PROSES TRANSAKSI", type="primary", use_container_width=True):
+                wib_now = get_wib_now()
+                id_tx = wib_now.strftime("%Y%m%d%H%M%S%f")[:-3]
+                try:
+                    for b in st.session_state.cart:
+                        con.execute("INSERT INTO transaksi VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                                    [id_tx, st.session_state.username, wib_now, b['nama'], b['qty'], b['harga'], b['subtotal']])
+                        con.execute("UPDATE produk SET stok = stok - ?, terakhir_diupdate = ? WHERE id = ?", 
+                                    [b['qty'], wib_now, b['id']])
+                    st.session_state.cart = []
+                    st.success("Transaksi Berhasil!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal transaksi: {e}")
         else:
             st.info("Keranjang kosong.")
 
-    # (Bagian Riwayat Harian tetap di bawah sini)
-
-    # --- FITUR BARU: RIWAYAT HARIAN KASIR ---
-    def cashier_ui():
-    # ... (kode keranjang belanja Anda) ...
-        # Baris ini harus menjorok ke dalam (4 spasi atau 1 tab)
-        tz_wib = pytz.timezone('Asia/Jakarta')
-        return datetime.now(tz_wib)
-
-    st.divider()
-    
-    # 1. BUAT DULU UI UNTUK LIMIT
-    col_head, col_opt = st.columns([2, 2])
-    with col_head:
-        st.subheader("📜 Riwayat Struk Hari Ini")
-    
-    with col_opt:
-        opsi_limit = [5, 10, 20, 50, "Semua"]
-        pilihan_limit = st.selectbox("Tampilkan maksimal:", opsi_limit, index=1)
-        
-        # DISINI VARIABEL limit_sql DIBUAT
-        if pilihan_limit == "Semua":
-            limit_sql = ""
-        else:
-            limit_sql = f"LIMIT {pilihan_limit}"
-
-    # 2. AMBIL TANGGAL WIB
-    tgl_wib_ini = get_wib_now().strftime("%Y-%m-%d")
-
-    # 3. BARU GUNAKAN limit_sql DI DALAM QUERY
-    query_tabel = f"""
-        SELECT 
-            id_transaksi AS "ID Struk", 
-            MAX(waktu) AS "Jam", 
-            SUM(total_harga) AS "Total Belanja",
-            COUNT(nama_produk) AS "Jenis Barang"
-        FROM transaksi 
-        WHERE kasir = ? AND CAST(waktu AS DATE) = ? 
-        GROUP BY id_transaksi
-        ORDER BY "Jam" DESC
-        {limit_sql}
-    """
-    
-    # 4. EKSEKUSI
-    df_struk = con.execute(query_tabel, [str(st.session_state.username), tgl_wib_ini]).df()
-    
-    # ... (tampilkan tabel) ...
-    if not df_struk.empty:
-        # Hitung omzet harian (selalu hitung total hari ini, tidak terpengaruh limit dropdown)
-        total_omzet = con.execute(
-            "SELECT SUM(total_harga) FROM transaksi WHERE kasir = ? AND CAST(waktu AS DATE) = CURRENT_DATE",
-            [str(st.session_state.username)]
-        ).fetchone()[0] or 0
-        
-        st.metric("Total Omzet Anda Hari Ini", f"Rp{total_omzet:,.0f}")
-        st.caption(f"Menampilkan {pilihan_limit} transaksi terbaru hari ini.")
-        
-        # Tabel Interaktif
-        st.dataframe(
-            df_struk.style.format({"Total Belanja": "Rp{:,.0f}", "Jam": lambda t: t.strftime('%H:%M:%S')}),
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        # Detail Struk
-        with st.expander("🔍 Cek Detail Barang per Struk"):
-            struk_pilihan = st.selectbox("Pilih ID Struk:", df_struk["ID Struk"])
-            if struk_pilihan:
-                df_det = con.execute(
-                    "SELECT nama_produk AS Produk, jumlah AS Qty, total_harga AS Subtotal FROM transaksi WHERE id_transaksi = ?", 
-                    [struk_pilihan]
-                ).df()
-                st.table(df_det)
-    else:
-        st.info("Belum ada transaksi yang tercatat hari ini.")
-
-# --- HALAMAN ADMIN (UPDATE STOK & DASHBOARD) ---
+# --- UI ADMIN ---
 def admin_ui():
-    now = get_wib_now()
     st.title("🏗️ Panel Admin")
-    menu_admin = st.sidebar.selectbox("Menu Admin", ["Dashboard Utama", "Manajemen Stok", "Data Transaksi"])
+    menu_admin = st.sidebar.selectbox("Menu Admin", ["Dashboard", "Manajemen Stok", "Data Transaksi"])
     
-    # --- DI DALAM admin_ui() ---
-    if menu_admin == "Dashboard Utama":
-        st.subheader("📊 Ringkasan Bisnis")
-        col1, col2 = st.columns(2)
-    
-        # 1. Ambil Pendapatan (Cara Aman)
+    if menu_admin == "Dashboard":
         res_p = con.execute("SELECT SUM(total_harga) FROM transaksi").fetchone()
-        # Jika res_p ada dan isinya bukan None, ambil index [0]. Jika tidak, beri 0.
-        total_penjualan = res_p[0] if res_p and res_p[0] is not None else 0
-    
-        # 2. Ambil Total Stok (Cara Aman)
-        res_s = con.execute("SELECT SUM(stok) FROM produk").fetchone()
-        total_stok = res_s[0] if res_s and res_s[0] is not None else 0
-    
-        col1.metric("Total Pendapatan", f"Rp{total_penjualan:,.0f}")
-        col2.metric("Total Stok Barang", f"{total_stok} unit")
-        
-        # --- Grafik Penjualan (Hanya muncul jika ada data) ---
-        df_tx = con.execute("SELECT * FROM transaksi").df()
+        st.metric("Total Pendapatan", f"Rp{res_p[0] or 0:,.0f}")
+        df_tx = con.execute("SELECT waktu, total_harga, nama_produk FROM transaksi").df()
         if not df_tx.empty:
-            fig = px.bar(df_tx, x='waktu', y='total_harga', title="Tren Penjualan", color='nama_produk')
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Belum ada data transaksi untuk ditampilkan di grafik.")
+            st.plotly_chart(px.line(df_tx.sort_values('waktu'), x='waktu', y='total_harga', title="Grafik Penjualan"), use_container_width=True)
 
     elif menu_admin == "Manajemen Stok":
-        st.subheader("📦 Manajemen Gudang & Stok")
-        
-        # Ambil data produk terbaru
+        st.subheader("📦 Pengaturan Produk")
         df_produk = con.execute("SELECT * FROM produk ORDER BY id ASC").df()
-        st.dataframe(df_produk, use_container_width=True)
+        st.dataframe(df_produk, use_container_width=True, hide_index=True)
         
-        # Kita bagi menjadi dua kolom untuk aksi
-        col_tambah, col_update = st.columns(2)
+        t1, t2, t3 = st.tabs(["➕ Tambah Baru", "🔄 Update Stok/Harga", "🗑️ Hapus Produk"])
         
-        with col_tambah:
-            with st.expander("➕ Tambah Barang Baru"):
-                with st.form("form_tambah_barang"):
-                    nama_baru = st.text_input("Nama Produk Baru")
-                    harga_baru = st.number_input("Harga Jual (Rp)", min_value=0, step=500)
-                    stok_awal = st.number_input("Stok Awal", min_value=0, step=1)
-                    btn_tambah = st.form_submit_button("Simpan Barang")
-                    
-                    if btn_tambah and nama_baru:
-                        # 1. Cari ID terakhir untuk menentukan ID baru
-                        max_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM produk").fetchone()[0]
-                        
-                        # 2. Masukkan ke database
-                        con.execute("""
-                            INSERT INTO produk (id, nama_produk, harga, stok) 
-                            VALUES (?, ?, ?, ?)
-                        """, [int(max_id), str(nama_baru), float(harga_baru), int(stok_awal)])
-                        
-                        st.success(f"Berhasil menambahkan {nama_baru}!")
-                        st.rerun()
-
-        with col_update:
-            with st.expander("🔄 Update Stok (Barang Eksis)"):
-                if not df_produk.empty:
-                    with st.form("form_update_stok"):
-                        prod_edit = st.selectbox("Pilih Produk", df_produk['nama_produk'])
-                        stok_tambahan = st.number_input("Jumlah Perubahan Stok (+/-)", step=1)
-                        btn_update = st.form_submit_button("Update Stok")
-                        
-                        if btn_update:
-                            con.execute("UPDATE produk SET stok = stok + ? WHERE nama_produk = ?", 
-                                        [int(stok_tambahan), str(prod_edit)])
-                            st.success(f"Stok {prod_edit} berhasil diperbarui!")
+        # 1. TAMBAH PRODUK (DENGAN WARNING DUPLIKAT)
+        with t1:
+            with st.form("add_p", clear_on_submit=True):
+                n = st.text_input("Nama Produk")
+                h = st.number_input("Harga Satuan", min_value=0, step=500)
+                s = st.number_input("Stok Awal", min_value=0)
+                if st.form_submit_button("Simpan"):
+                    if n:
+                        # Cek apakah nama sudah ada (Case Insensitive)
+                        check = con.execute("SELECT 1 FROM produk WHERE LOWER(nama_produk) = LOWER(?)", [n.strip()]).fetchone()
+                        if check:
+                            st.warning(f"⚠️ Produk '{n}' sudah ada di database.")
+                        else:
+                            max_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM produk").fetchone()[0]
+                            con.execute("INSERT INTO produk VALUES (?, ?, ?, ?, ?)", [max_id, n.strip(), h, s, get_wib_now()])
+                            st.success(f"Berhasil menambah {n}")
                             st.rerun()
-                else:
-                    st.info("Belum ada barang di database.")
+                    else:
+                        st.error("Nama produk tidak boleh kosong.")
+
+        # 2. UPDATE STOK & HARGA
+        with t2:
+            if not df_produk.empty:
+                with st.form("update_s"):
+                    p_upd = st.selectbox("Pilih Produk yang akan diupdate", df_produk['nama_produk'].tolist())
+                    new_h = st.number_input("Update Harga Baru (Biarkan jika tetap)", min_value=0)
+                    new_s = st.number_input("Tambah Stok (Gunakan angka negatif untuk mengurangi)", step=1)
+                    if st.form_submit_button("Update Data"):
+                        # Jika harga baru 0, pakai harga lama
+                        current_h = con.execute("SELECT harga FROM produk WHERE nama_produk = ?", [p_upd]).fetchone()[0]
+                        final_h = new_h if new_h > 0 else current_h
+                        
+                        con.execute("UPDATE produk SET stok = stok + ?, harga = ?, terakhir_diupdate = ? WHERE nama_produk = ?", 
+                                    [new_s, final_h, get_wib_now(), p_upd])
+                        st.success(f"Produk {p_upd} berhasil diperbarui!")
+                        st.rerun()
+            else:
+                st.info("Belum ada produk.")
+
+        # 3. HAPUS PRODUK (BARU)
+        with t3:
+            if not df_produk.empty:
+                st.warning("Hati-hati: Produk yang dihapus tidak bisa dikembalikan!")
+                with st.form("del_p"):
+                    p_del = st.selectbox("Pilih Produk yang akan DIHAPUS", df_produk['nama_produk'].tolist())
+                    konfirmasi = st.checkbox("Saya yakin ingin menghapus produk ini secara permanen")
+                    if st.form_submit_button("🚨 HAPUS SEKARANG", type="primary"):
+                        if konfirmasi:
+                            con.execute("DELETE FROM produk WHERE nama_produk = ?", [p_del])
+                            st.success(f"Produk '{p_del}' telah dihapus.")
+                            st.rerun()
+                        else:
+                            st.error("Centang kotak konfirmasi dulu!")
+            else:
+                st.info("Tidak ada produk untuk dihapus.")
 
     elif menu_admin == "Data Transaksi":
-        st.subheader("📝 Histori Transaksi Lengkap")
-        df_tx = con.execute("SELECT * FROM transaksi ORDER BY waktu DESC").df()
-        st.dataframe(df_tx, use_container_width=True)
+        st.subheader("📜 Riwayat Penjualan")
+        df_all = con.execute("SELECT * FROM transaksi ORDER BY waktu DESC").df()
+        st.dataframe(df_all, use_container_width=True)
 
-# --- LOGIKA UTAMA ---
-if "logged_in" not in st.session_state:
+# --- LOGOUT & RUN ---
+if not st.session_state.logged_in:
     login_ui()
 else:
-    # Sidebar untuk logout
-    st.sidebar.write(f"Logged in as: **{st.session_state.username}** ({st.session_state.role})")
-    if st.sidebar.button("Logout"):
-        del st.session_state.logged_in
+    st.sidebar.title(f"👋 {st.session_state.username}")
+    if st.sidebar.button("Logout", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.cart = []
         st.rerun()
     
-    # Render UI berdasarkan role
     if st.session_state.role == "admin":
         admin_ui()
     else:
