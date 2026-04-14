@@ -1,14 +1,14 @@
 import streamlit as st
 import duckdb
 
-# KONFIGURASI
-# Tempel Token MotherDuck Anda di sini (nanti kita buat lebih aman)
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImFuZGVhbnAyQGdtYWlsLmNvbSIsIm1kUmVnaW9uIjoiYXdzLXVzLWVhc3QtMSIsInNlc3Npb24iOiJhbmRlYW5wMi5nbWFpbC5jb20iLCJwYXQiOiJwc2tMeDFjM1dIbThGT3RiU2s0OHNzX3dDZWNHMlRPQUJvbnBkZnlZRE9NIiwidXNlcklkIjoiNDhmOGY0MGEtZjQ0Zi00OWNlLThkZGUtMzZlOWU4NDE4YWNjIiwiaXNzIjoibWRfcGF0IiwicmVhZE9ubHkiOmZhbHNlLCJ0b2tlblR5cGUiOiJyZWFkX3dyaXRlIiwiaWF0IjoxNzc2MTUxMjMzfQ.aP-lwGh6bMopDmHExtB4WO285qCb4U2JINBVfkZi_hI"
+# KONFIGURASI AMAN
+# Mengambil token dari "brankas" Secrets (bukan diketik langsung)
+TOKEN = st.secrets["MOTHERDUCK_TOKEN"]
 
 # Koneksi ke MotherDuck
 @st.cache_resource
 def get_connection():
-    # Mengambil token dari Secrets Streamlit Cloud
+        # Mengambil token dari Secrets Streamlit Cloud
     token_auth = st.secrets["MOTHERDUCK_TOKEN"]
     # Cara koneksi yang lebih stabil
     return duckdb.connect(f"md:my_db?motherduck_token={token_auth}")
