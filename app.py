@@ -124,26 +124,23 @@ def cashier_ui():
         opsi_limit = [5, 10, 20, 50, "Semua"]
         pilihan_limit = st.selectbox("Tampilkan maksimal:", opsi_limit, index=1) # Default index 1 (yaitu 10)
 
-    # Logika SQL untuk LIMIT
-    if pilihan_limit == "Semua":
-        limit_sql = ""
-    else:
-        limit_sql = f"LIMIT {pilihan_limit}"
-    
+    # Ambil tanggal WIB sekarang untuk filter
+    tgl_wib_ini = get_wib_now().strftime("%Y-%m-%d")
+
     query_tabel = f"""
         SELECT 
             id_transaksi AS "ID Struk", 
             MAX(waktu) AS "Jam", 
-            SUM(total_harga) AS "Total Belanja",
-            COUNT(nama_produk) AS "Jenis Barang"
+            SUM(total_harga) AS "Total Belanja"
         FROM transaksi 
-        WHERE kasir = ? AND CAST(waktu AS DATE) = CURRENT_DATE
+        WHERE kasir = ? AND CAST(waktu AS DATE) = ?  -- Gunakan parameter ? untuk tanggal
         GROUP BY id_transaksi
         ORDER BY "Jam" DESC
         {limit_sql}
     """
     
-    df_struk = con.execute(query_tabel, [str(st.session_state.username)]).df()
+    # Masukkan tgl_wib_ini ke dalam execute
+    df_struk = con.execute(query_tabel, [str(st.session_state.username), tgl_wib_ini]).df()
 
     if not df_struk.empty:
         # Hitung omzet harian (selalu hitung total hari ini, tidak terpengaruh limit dropdown)
