@@ -85,12 +85,13 @@ def cashier_ui():
                 
                 # Cek apakah stok cukup
                 if produk_data['stok'] >= qty_pilih:
+                    # Bagian saat tombol "Tambah" diklik
                     st.session_state.cart.append({
                         "id": produk_data['id'],
                         "nama": item_pilih,
                         "harga": produk_data['harga'],
                         "qty": qty_pilih,
-                        "total": qty_pilih * produk_data['harga']
+                        "subtotal": qty_pilih * produk_data['harga'] # Pastikan namanya 'subtotal'
                     })
                     st.success(f"Masuk keranjang: {item_pilih}")
                     st.rerun()
@@ -103,14 +104,16 @@ def cashier_ui():
             # --- TAMPILAN KERANJANG INTERAKTIF ---
             total_bayar = 0
             for i, barang in enumerate(st.session_state.cart):
-                c1, c2, c3 = st.columns([3, 2, 1])
-                c1.write(f"**{barang['nama']}** \n{barang['qty']} x Rp{barang['harga']:,.0f}")
-                c2.write(f"  \nRp{barang['subtotal']:,.0f}")
-                # Tombol hapus spesifik per baris
-                if c3.button("🗑️", key=f"del_{i}"):
-                    st.session_state.cart.pop(i)
-                    st.rerun()
-                total_bayar += barang['subtotal']
+                with st.container():
+                    c1, c2, c3 = st.columns([3, 2, 1])
+                    c1.write(f"**{barang['nama']}** \n{barang['qty']} x Rp{barang['harga']:,.0f}")
+        
+                    # BARIS YANG ERROR TADI: Pastikan pakai ['subtotal']
+                    c2.write(f"  \nRp{barang['subtotal']:,.0f}") 
+        
+                    if c3.button("🗑️", key=f"del_{i}"):
+                        st.session_state.cart.pop(i)
+                        st.rerun()
             
             st.divider()
             st.write(f"### TOTAL: Rp{total_bayar:,.0f}")
