@@ -60,10 +60,11 @@ def cashier_ui():
                 row = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
                 if int(row['stok']) >= qty_pilih:
                     st.session_state.cart.append({
-                        "nama": item_pilih, 
+                        "id": int(produk_data['id']),
+                        "nama": item_pilih,
+                        "harga": float(produk_data['harga']),
                         "qty": int(qty_pilih),
-                        "harga": float(row['harga']), 
-                        "subtotal": float(row['harga'] * qty_pilih)
+                        "subtotal": float(qty_pilih * produk_data['harga']) # <--- Pastikan namanya "subtotal"
                     })
                     st.toast(f"{item_pilih} ditambah!")
                 else:
