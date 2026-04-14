@@ -108,16 +108,20 @@ def cashier_ui():
     # --- FITUR BARU: RIWAYAT HARIAN KASIR ---
     st.divider()
     
-    # Header dengan Toggle Fleksibel
-    col_head, col_opt = st.columns([3, 1])
+    col_head, col_opt = st.columns([2, 2])
     with col_head:
         st.subheader("📜 Riwayat Struk Hari Ini")
+    
     with col_opt:
-        # Toggle untuk beralih antara 10 terakhir vs Semua
-        lihat_semua = st.toggle("Lihat Semua", value=False)
+        # Dropdown untuk memilih jumlah baris yang tampil
+        opsi_limit = [5, 10, 20, 50, "Semua"]
+        pilihan_limit = st.selectbox("Tampilkan maksimal:", opsi_limit, index=1) # Default index 1 (yaitu 10)
 
-    # Logika SQL: Limit 10 jika toggle off, tanpa limit jika toggle on
-    limit_sql = "" if lihat_semua else "LIMIT 10"
+    # Logika SQL untuk LIMIT
+    if pilihan_limit == "Semua":
+        limit_sql = ""
+    else:
+        limit_sql = f"LIMIT {pilihan_limit}"
     
     query_tabel = f"""
         SELECT 
@@ -135,24 +139,25 @@ def cashier_ui():
     df_struk = con.execute(query_tabel, [str(st.session_state.username)]).df()
 
     if not df_struk.empty:
-        # Menampilkan Omzet Singkat
-        total_omzet = df_struk["Total Belanja"].sum() if lihat_semua else con.execute(
+        # Hitung omzet harian (selalu hitung total hari ini, tidak terpengaruh limit dropdown)
+        total_omzet = con.execute(
             "SELECT SUM(total_harga) FROM transaksi WHERE kasir = ? AND CAST(waktu AS DATE) = CURRENT_DATE",
             [str(st.session_state.username)]
-        ).fetchone()[0]
+        ).fetchone()[0] or 0
         
-        st.caption(f"Menampilkan {'seluruh' if lihat_semua else '10 terbaru'} transaksi hari ini.")
+        st.metric("Total Omzet Anda Hari Ini", f"Rp{total_omzet:,.0f}")
+        st.caption(f"Menampilkan {pilihan_limit} transaksi terbaru hari ini.")
         
-        # Tabel Utama (Menggunakan st.dataframe agar user bisa sortir kolom secara manual)
+        # Tabel Interaktif
         st.dataframe(
-            df_struk.style.format({"Total Belanja": "Rp{:,.0f}"}),
+            df_struk.style.format({"Total Belanja": "Rp{:,.0f}", "Jam": lambda t: t.strftime('%H:%M:%S')}),
             use_container_width=True,
             hide_index=True
         )
         
-        # Detail Struk (Dropdown untuk melihat isi struk spesifik)
-        with st.expander("🔍 Cek Detail Isi Struk"):
-            struk_pilihan = st.selectbox("Pilih ID Struk untuk melihat daftar barang:", df_struk["ID Struk"])
+        # Detail Struk
+        with st.expander("🔍 Cek Detail Barang per Struk"):
+            struk_pilihan = st.selectbox("Pilih ID Struk:", df_struk["ID Struk"])
             if struk_pilihan:
                 df_det = con.execute(
                     "SELECT nama_produk AS Produk, jumlah AS Qty, total_harga AS Subtotal FROM transaksi WHERE id_transaksi = ?", 
@@ -160,8 +165,8 @@ def cashier_ui():
                 ).df()
                 st.table(df_det)
     else:
-        st.info("Belum ada transaksi untuk akun ini hari ini.")
-        
+        st.info("Belum ada transaksi yang tercatat hari ini.")
+
 # --- HALAMAN ADMIN (UPDATE STOK & DASHBOARD) ---
 def admin_ui():
     st.title("🏗️ Panel Admin")
