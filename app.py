@@ -37,14 +37,12 @@ def login_ui():
 def cashier_ui():
     st.header(f"🛒 Kasir: {st.session_state.username}")
     
-    # 1. Inisialisasi Keranjang Belanja di Session State jika belum ada
+    # --- LOGIKA KERANJANG (Sama seperti sebelumnya) ---
     if "cart" not in st.session_state:
         st.session_state.cart = []
 
-    # Ambil data produk terbaru
     df_produk = con.execute("SELECT * FROM produk").df()
 
-    # LAYOUT: Kiri untuk Input, Kanan untuk Daftar Keranjang
     col_input, col_cart = st.columns([1, 2])
 
     with col_input:
@@ -52,65 +50,69 @@ def cashier_ui():
         with st.form("form_add_to_cart", clear_on_submit=True):
             item_pilih = st.selectbox("Produk", df_produk['nama_produk'])
             qty_pilih = st.number_input("Jumlah", min_value=1, step=1)
-            btn_add = st.form_submit_button("➕ Tambah ke Keranjang")
+            btn_add = st.form_submit_button("➕ Tambah")
 
             if btn_add:
-                # Ambil info harga dan stok
                 row = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
-                harga_satuan = float(row['harga'])
-                stok_tersedia = int(row['stok'])
-
-                if stok_tersedia >= qty_pilih:
-                    # Masukkan ke list sementara
+                if int(row['stok']) >= qty_pilih:
                     st.session_state.cart.append({
-                        "nama": item_pilih,
-                        "qty": int(qty_pilih),
-                        "harga": harga_satuan,
-                        "subtotal": float(harga_satuan * qty_pilih)
+                        "nama": item_pilih, "qty": int(qty_pilih),
+                        "harga": float(row['harga']), "subtotal": float(row['harga'] * qty_pilih)
                     })
-                    st.toast(f"{item_pilih} ditambah!")
+                    st.toast(f"{item_pilih} masuk!")
                 else:
-                    st.error("Stok tidak cukup!")
+                    st.error("Stok habis!")
 
     with col_cart:
         st.subheader("Isi Keranjang")
         if st.session_state.cart:
             df_cart = pd.DataFrame(st.session_state.cart)
             st.table(df_cart)
-            
             total_bayar = df_cart['subtotal'].sum()
             st.write(f"### TOTAL: Rp{total_bayar:,.0f}")
-
-            c1, c2 = st.columns(2)
-            if c1.button("🗑️ Kosongkan Keranjang"):
-                st.session_state.cart = []
-                st.rerun()
-
-            if c2.button("✅ PROSES TRANSAKSI"):
-                # PROSES SEMUA BARANG DI KERANJANG KE DATABASE
+            
+            if st.button("✅ PROSES TRANSAKSI"):
                 id_tx = str(datetime.now().strftime("%Y%m%d%H%M%S"))
                 waktu_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                for b in st.session_state.cart:
+                    con.execute("UPDATE produk SET stok = stok - ? WHERE nama_produk = ?", [b['qty'], b['nama']])
+                    con.execute("""
+                        INSERT INTO transaksi (id_transaksi, nama_produk, jumlah, total_harga, kasir, waktu) 
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, [id_tx, b['nama'], b['qty'], b['subtotal'], str(st.session_state.username), waktu_str])
                 
-                try:
-                    for barang in st.session_state.cart:
-                        # Update Stok
-                        con.execute("UPDATE produk SET stok = stok - ? WHERE nama_produk = ?", 
-                                    [barang['qty'], barang['nama']])
-                        
-                        # Catat Transaksi
-                        con.execute("""
-                            INSERT INTO transaksi (id_transaksi, nama_produk, jumlah, total_harga, kasir, waktu) 
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        """, [id_tx, barang['nama'], barang['qty'], barang['subtotal'], str(st.session_state.username), waktu_str])
-                    
-                    st.success("Transaksi Berhasil Disimpan!")
-                    st.balloons()
-                    st.session_state.cart = [] # Kosongkan keranjang setelah sukses
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Gagal memproses transaksi: {e}")
+                st.success("Berhasil!")
+                st.session_state.cart = []
+                st.rerun()
         else:
-            st.info("Keranjang masih kosong.")
+            st.info("Keranjang kosong.")
+
+    # --- FITUR BARU: RIWAYAT HARIAN KASIR ---
+    st.divider()
+    st.subheader("📜 Riwayat Transaksi Anda Hari Ini")
+    
+    # Query mengambil data hanya untuk kasir aktif dan hanya hari ini
+    query_history = """
+        SELECT waktu, id_transaksi, nama_produk, jumlah, total_harga 
+        FROM transaksi 
+        WHERE kasir = ? AND CAST(waktu AS DATE) = CURRENT_DATE
+        ORDER BY waktu DESC
+    """
+    df_history = con.execute(query_history, [str(st.session_state.username)]).df()
+
+    if not df_history.empty:
+        # Ringkasan Kecil
+        total_omzet_harian = df_history['total_harga'].sum()
+        total_item_terjual = df_history['jumlah'].sum()
+        
+        c1, c2 = st.columns(2)
+        c1.metric("Omzet Anda Hari Ini", f"Rp{total_omzet_harian:,.0f}")
+        c2.metric("Item Terjual", f"{total_item_terjual} unit")
+        
+        # Tabel Riwayat
+        st.dataframe(df_history, use_container_width=True)
+    else:
+        st.write("Belum ada transaksi hari ini.")
 
 # --- HALAMAN ADMIN (UPDATE STOK & DASHBOARD) ---
 def admin_ui():
