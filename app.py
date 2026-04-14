@@ -64,7 +64,7 @@ def cashier_ui():
                         "nama": item_pilih,
                         "harga": float(produk_data['harga']),
                         "qty": int(qty_pilih),
-                        "subtotal": float(qty_pilih * produk_data['harga']) # <--- Pastikan namanya "subtotal"
+                        "subtotal": float(produk_data['harga']) # <--- Pastikan namanya "subtotal"
                     })
                     st.toast(f"{item_pilih} ditambah!")
                 else:
