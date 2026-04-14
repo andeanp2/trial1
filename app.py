@@ -42,17 +42,21 @@ def login_ui():
 def cashier_ui():
     st.header(f"🛒 Kasir: {st.session_state.username}")
     
-    # 1. Pastikan Keranjang Ada
-    if "cart" not in st.session_state:
-        st.session_state.cart = []
-
-    # 2. Ambil data dengan cara aman (Jika terakhir_diupdate belum ada, aplikasi tidak crash)
+    # 1. AMBIL DATA PRODUK DENGAN PENGAMAN (PASTE DI SINI)
     try:
-        # Kita coba ambil semua kolom termasuk yang baru
-        df_produk = con.execute("SELECT id, nama_produk, harga, stok, terakhir_diupdate FROM produk").df()
-    except:
-        # Jika kolom 'terakhir_diupdate' belum dibuat di MotherDuck, ambil yang standar saja
-        df_produk = con.execute("SELECT id, nama_produk, harga, stok FROM produk").df()
+        # Mencoba mengambil data lengkap
+        df_produk = con.execute("SELECT id, nama_produk, harga, stok, terakhir_diupdate FROM produk ORDER BY id ASC").df()
+    except Exception as e:
+        # Jika kolom 'terakhir_diupdate' belum ada/error, gunakan query standar
+        df_produk = con.execute("SELECT id, nama_produk, harga, stok FROM produk ORDER BY id ASC").df()
+
+    # 2. CEK APAKAH TABEL KOSONG
+    if df_produk.empty:
+        st.warning("Data produk masih kosong. Silakan hubungi Admin untuk isi stok.")
+        return # Berhenti di sini agar tidak error di bawah
+
+    # 3. LANJUT KE UI INPUT (Keranjang dll)
+    # ... sisa kode kasir Anda ...
 
     # 3. Cek apakah database kosong
     if df_produk.empty:
