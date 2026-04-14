@@ -42,23 +42,33 @@ def login_ui():
 def cashier_ui():
     st.header(f"🛒 Kasir: {st.session_state.username}")
     
+    # 1. Pastikan Keranjang Ada
     if "cart" not in st.session_state:
         st.session_state.cart = []
 
-    df_produk = con.execute("SELECT id, nama_produk, harga, stok, terakhir_diupdate FROM produk ORDER BY id ASC").df()
-    st.dataframe(
-        df_produk.style.format({"terakhir_diupdate": lambda t: t.strftime('%d/%m %H:%M') if pd.notnull(t) else "-"}),
-        use_container_width=True
-    )
+    # 2. Ambil data dengan cara aman (Jika terakhir_diupdate belum ada, aplikasi tidak crash)
+    try:
+        # Kita coba ambil semua kolom termasuk yang baru
+        df_produk = con.execute("SELECT id, nama_produk, harga, stok, terakhir_diupdate FROM produk").df()
+    except:
+        # Jika kolom 'terakhir_diupdate' belum dibuat di MotherDuck, ambil yang standar saja
+        df_produk = con.execute("SELECT id, nama_produk, harga, stok FROM produk").df()
 
+    # 3. Cek apakah database kosong
+    if df_produk.empty:
+        st.warning("Data produk masih kosong. Silakan hubungi Admin untuk isi stok.")
+        return # Berhenti di sini jika tidak ada produk
+
+    # --- SISA KODE (Layout Kolom Input & Keranjang) TETAP SAMA ---
     col_input, col_cart = st.columns([1, 2])
-
+    
     with col_input:
         st.subheader("Pilih Barang")
         with st.form("form_add_to_cart", clear_on_submit=True):
-            item_pilih = st.selectbox("Produk", df_produk['nama_produk'])
+            # Gunakan list nama_produk untuk selectbox
+            item_pilih = st.selectbox("Produk", df_produk['nama_produk'].tolist())
             qty_pilih = st.number_input("Jumlah", min_value=1, step=1)
-            btn_add = st.form_submit_button("➕ Tambah")
+            # ... dst
 
             if btn_add:
                 row = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
