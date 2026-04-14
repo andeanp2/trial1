@@ -195,18 +195,27 @@ def admin_ui():
         st.subheader("📊 Ringkasan Bisnis")
         col1, col2 = st.columns(2)
         
-        # Metric Sederhana
-        total_penjualan = con.execute("SELECT SUM(total_harga) FROM transaksi").fetchone()[0] or 0
-        total_stok = con.execute("SELECT SUM(stok) FROM produk").fetchone()[0] or 0
+        # --- PERBAIKAN DI SINI: Gunakan COALESCE agar tidak Error saat data kosong ---
         
+        # Ambil Total Pendapatan
+        res_penjualan = con.execute("SELECT COALESCE(SUM(total_harga), 0) FROM transaksi").fetchone()
+        total_penjualan = res_penjualan[0] if res_penjualan else 0
+        
+        # Ambil Total Stok
+        res_stok = con.execute("SELECT COALESCE(SUM(stok), 0) FROM produk").fetchone()
+        total_stok = res_stok[0] if res_stok else 0
+        
+        # Tampilkan ke Widget
         col1.metric("Total Pendapatan", f"Rp{total_penjualan:,.0f}")
         col2.metric("Total Stok Barang", f"{total_stok} unit")
         
-        # Grafik Penjualan (Plotly)
+        # --- Grafik Penjualan (Hanya muncul jika ada data) ---
         df_tx = con.execute("SELECT * FROM transaksi").df()
         if not df_tx.empty:
             fig = px.bar(df_tx, x='waktu', y='total_harga', title="Tren Penjualan", color='nama_produk')
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Belum ada data transaksi untuk ditampilkan di grafik.")
 
     elif menu_admin == "Manajemen Stok":
         st.subheader("📦 Manajemen Gudang & Stok")
