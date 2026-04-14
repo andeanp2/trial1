@@ -93,8 +93,10 @@ def cashier_ui():
                 st.rerun()
 
             if c2.button("✅ PROSES TRANSAKSI"):
-                id_tx = str(datetime.now().strftime("%Y%m%d%H%M%S"))
-                waktu_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                wib_now = get_wib_now() # Ambil jam Jakarta
+                id_tx = wib_now.strftime("%Y%m%d%H%M%S")
+                waktu_str = wib_now.strftime("%Y-%m-%d %H:%M:%S")
+                tgl_hari_ini = wib_now.strftime("%Y-%m-%d") # Untuk filter history nanti
                 for b in st.session_state.cart:
                     con.execute("UPDATE produk SET stok = stok - ? WHERE nama_produk = ?", [b['qty'], b['nama']])
                     con.execute("""
