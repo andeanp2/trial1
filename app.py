@@ -192,21 +192,20 @@ def admin_ui():
     st.title("🏗️ Panel Admin")
     menu_admin = st.sidebar.selectbox("Menu Admin", ["Dashboard Utama", "Manajemen Stok", "Data Transaksi"])
     
+    # --- DI DALAM admin_ui() ---
     if menu_admin == "Dashboard Utama":
         st.subheader("📊 Ringkasan Bisnis")
         col1, col2 = st.columns(2)
-        
-        # --- PERBAIKAN DI SINI: Gunakan COALESCE agar tidak Error saat data kosong ---
-        
-        # Ambil Total Pendapatan
-        res_penjualan = con.execute("SELECT COALESCE(SUM(total_harga), 0) FROM transaksi").fetchone()
-        total_penjualan = res_penjualan[0] if res_penjualan else 0
-        
-        # Ambil Total Stok
-        res_stok = con.execute("SELECT COALESCE(SUM(stok), 0) FROM produk").fetchone()
-        total_stok = res_stok[0] if res_stok else 0
-        
-        # Tampilkan ke Widget
+    
+        # 1. Ambil Pendapatan (Cara Aman)
+        res_p = con.execute("SELECT SUM(total_harga) FROM transaksi").fetchone()
+        # Jika res_p ada dan isinya bukan None, ambil index [0]. Jika tidak, beri 0.
+        total_penjualan = res_p[0] if res_p and res_p[0] is not None else 0
+    
+        # 2. Ambil Total Stok (Cara Aman)
+        res_s = con.execute("SELECT SUM(stok) FROM produk").fetchone()
+        total_stok = res_s[0] if res_s and res_s[0] is not None else 0
+    
         col1.metric("Total Pendapatan", f"Rp{total_penjualan:,.0f}")
         col2.metric("Total Stok Barang", f"{total_stok} unit")
         
