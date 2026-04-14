@@ -8,8 +8,10 @@ TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImFuZGVhbnAyQGdtYWlsLm
 # Koneksi ke MotherDuck
 @st.cache_resource
 def get_connection():
-    return duckdb.connect(f"md:my_db?motherduck_token={TOKEN}")
-
+    # Mengambil token dari Secrets Streamlit Cloud
+    token_auth = st.secrets["MOTHERDUCK_TOKEN"]
+    # Cara koneksi yang lebih stabil
+    return duckdb.connect(f"md:my_db?motherduck_token={token_auth}")
 con = get_connection()
 
 st.title("🚀 Kasir v1.0")
