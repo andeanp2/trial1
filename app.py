@@ -23,41 +23,16 @@ con = get_connection()
 
 # --- INISIALISASI DATABASE (OTOMATIS) ---
 def init_db():
-    # Membuat tabel jika belum ada
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS produk (
-            id INTEGER PRIMARY KEY,
-            nama_produk VARCHAR,
-            harga DOUBLE,
-            stok INTEGER,
-            terakhir_diupdate TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS transaksi (
-            id_transaksi VARCHAR,
-            kasir VARCHAR,
-            waktu TIMESTAMP,
-            nama_produk VARCHAR,
-            jumlah INTEGER,
-            harga_satuan DOUBLE,
-            total_harga DOUBLE
-        );
-        CREATE TABLE IF NOT EXISTS log_stok (
-            id_log INTEGER PRIMARY KEY,
-            id_produk INTEGER,
-            nama_produk VARCHAR,
-            stok_awal INTEGER,
-            perubahan INTEGER,
-            keterangan VARCHAR,
-            waktu TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS users (
-            username VARCHAR PRIMARY KEY,
-            password VARCHAR,
-            role VARCHAR
-        );
-    """)
+    # Jalankan perintah satu per satu agar tidak error InvalidInput
+    con.execute("CREATE TABLE IF NOT EXISTS produk (id INTEGER PRIMARY KEY, nama_produk VARCHAR, harga DOUBLE, stok INTEGER, terakhir_diupdate TIMESTAMP)")
     
-    # Cek jika user admin belum ada, buat default (user: admin, pass: admin123)
+    con.execute("CREATE TABLE IF NOT EXISTS transaksi (id_transaksi VARCHAR, kasir VARCHAR, waktu TIMESTAMP, nama_produk VARCHAR, jumlah INTEGER, harga_satuan DOUBLE, total_harga DOUBLE)")
+    
+    con.execute("CREATE TABLE IF NOT EXISTS log_stok (id_log INTEGER PRIMARY KEY, id_produk INTEGER, nama_produk VARCHAR, stok_awal INTEGER, perubahan INTEGER, keterangan VARCHAR, waktu TIMESTAMP)")
+    
+    con.execute("CREATE TABLE IF NOT EXISTS users (username VARCHAR PRIMARY KEY, password VARCHAR, role VARCHAR)")
+    
+    # Cek jika user admin belum ada
     user_exists = con.execute("SELECT * FROM users WHERE username = 'admin'").fetchone()
     if not user_exists:
         con.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin'), ('kasir1', '123', 'kasir')")
