@@ -1,13 +1,8 @@
 import streamlit as st
 import duckdb
 import pandas as pd
-import pytz 
+import plotly.express as px
 from datetime import datetime
-
-# Fungsi untuk mendapatkan waktu WIB sekarang
-def get_wib_now():
-    tz_wib = pytz.timezone('Asia/Jakarta')
-    return datetime.now(tz_wib)
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Sistem Kasir Pro v1", layout="wide")
@@ -93,10 +88,8 @@ def cashier_ui():
                 st.rerun()
 
             if c2.button("✅ PROSES TRANSAKSI"):
-                wib_now = get_wib_now() # Ambil jam Jakarta
-                id_tx = wib_now.strftime("%Y%m%d%H%M%S")
-                waktu_str = wib_now.strftime("%Y-%m-%d %H:%M:%S")
-                tgl_hari_ini = wib_now.strftime("%Y-%m-%d") # Untuk filter history nanti
+                id_tx = str(datetime.now().strftime("%Y%m%d%H%M%S"))
+                waktu_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 for b in st.session_state.cart:
                     con.execute("UPDATE produk SET stok = stok - ? WHERE nama_produk = ?", [b['qty'], b['nama']])
                     con.execute("""
@@ -113,33 +106,23 @@ def cashier_ui():
     # (Bagian Riwayat Harian tetap di bawah sini)
 
     # --- FITUR BARU: RIWAYAT HARIAN KASIR ---
-    def cashier_ui():
-    # ... (kode keranjang belanja Anda) ...
-        # Baris ini harus menjorok ke dalam (4 spasi atau 1 tab)
-        tz_wib = pytz.timezone('Asia/Jakarta')
-        return datetime.now(tz_wib)
-
     st.divider()
     
-    # 1. BUAT DULU UI UNTUK LIMIT
     col_head, col_opt = st.columns([2, 2])
     with col_head:
         st.subheader("📜 Riwayat Struk Hari Ini")
     
     with col_opt:
+        # Dropdown untuk memilih jumlah baris yang tampil
         opsi_limit = [5, 10, 20, 50, "Semua"]
-        pilihan_limit = st.selectbox("Tampilkan maksimal:", opsi_limit, index=1)
-        
-        # DISINI VARIABEL limit_sql DIBUAT
-        if pilihan_limit == "Semua":
-            limit_sql = ""
-        else:
-            limit_sql = f"LIMIT {pilihan_limit}"
+        pilihan_limit = st.selectbox("Tampilkan maksimal:", opsi_limit, index=1) # Default index 1 (yaitu 10)
 
-    # 2. AMBIL TANGGAL WIB
-    tgl_wib_ini = get_wib_now().strftime("%Y-%m-%d")
-
-    # 3. BARU GUNAKAN limit_sql DI DALAM QUERY
+    # Logika SQL untuk LIMIT
+    if pilihan_limit == "Semua":
+        limit_sql = ""
+    else:
+        limit_sql = f"LIMIT {pilihan_limit}"
+    
     query_tabel = f"""
         SELECT 
             id_transaksi AS "ID Struk", 
@@ -147,16 +130,14 @@ def cashier_ui():
             SUM(total_harga) AS "Total Belanja",
             COUNT(nama_produk) AS "Jenis Barang"
         FROM transaksi 
-        WHERE kasir = ? AND CAST(waktu AS DATE) = ? 
+        WHERE kasir = ? AND CAST(waktu AS DATE) = CURRENT_DATE
         GROUP BY id_transaksi
         ORDER BY "Jam" DESC
         {limit_sql}
     """
     
-    # 4. EKSEKUSI
-    df_struk = con.execute(query_tabel, [str(st.session_state.username), tgl_wib_ini]).df()
-    
-    # ... (tampilkan tabel) ...
+    df_struk = con.execute(query_tabel, [str(st.session_state.username)]).df()
+
     if not df_struk.empty:
         # Hitung omzet harian (selalu hitung total hari ini, tidak terpengaruh limit dropdown)
         total_omzet = con.execute(
@@ -188,92 +169,72 @@ def cashier_ui():
 
 # --- HALAMAN ADMIN (UPDATE STOK & DASHBOARD) ---
 def admin_ui():
-    now = get_wib_now()
     st.title("🏗️ Panel Admin")
     menu_admin = st.sidebar.selectbox("Menu Admin", ["Dashboard Utama", "Manajemen Stok", "Data Transaksi"])
     
-    # --- DI DALAM admin_ui() ---
     if menu_admin == "Dashboard Utama":
         st.subheader("📊 Ringkasan Bisnis")
         col1, col2 = st.columns(2)
-    
-        # 1. Ambil Pendapatan (Cara Aman)
-        res_p = con.execute("SELECT SUM(total_harga) FROM transaksi").fetchone()
-        # Jika res_p ada dan isinya bukan None, ambil index [0]. Jika tidak, beri 0.
-        total_penjualan = res_p[0] if res_p and res_p[0] is not None else 0
-    
-        # 2. Ambil Total Stok (Cara Aman)
-        res_s = con.execute("SELECT SUM(stok) FROM produk").fetchone()
-        total_stok = res_s[0] if res_s and res_s[0] is not None else 0
-    
+        
+        # Metric Sederhana
+        total_penjualan = con.execute("SELECT SUM(total_harga) FROM transaksi").fetchone()[0] or 0
+        total_stok = con.execute("SELECT SUM(stok) FROM produk").fetchone()[0] or 0
+        
         col1.metric("Total Pendapatan", f"Rp{total_penjualan:,.0f}")
         col2.metric("Total Stok Barang", f"{total_stok} unit")
         
-        # --- Grafik Penjualan (Hanya muncul jika ada data) ---
+        # Grafik Penjualan (Plotly)
         df_tx = con.execute("SELECT * FROM transaksi").df()
         if not df_tx.empty:
             fig = px.bar(df_tx, x='waktu', y='total_harga', title="Tren Penjualan", color='nama_produk')
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Belum ada data transaksi untuk ditampilkan di grafik.")
 
     elif menu_admin == "Manajemen Stok":
         st.subheader("📦 Manajemen Gudang & Stok")
         
         # Ambil data produk terbaru
         df_produk = con.execute("SELECT * FROM produk ORDER BY id ASC").df()
-        st.dataframe(df_produk, use_container_width=True, hide_index=True)
+        st.dataframe(df_produk, use_container_width=True)
         
-        # TAB untuk memisahkan aksi agar rapi
-        tab1, tab2, tab3 = st.tabs(["➕ Tambah Baru", "✏️ Edit Produk", "🔄 Update Stok Cepat"])
+        # Kita bagi menjadi dua kolom untuk aksi
+        col_tambah, col_update = st.columns(2)
         
-        with tab1:
-            with st.form("form_tambah"):
-                st.write("### Tambah Produk Baru")
-                n_baru = st.text_input("Nama Produk")
-                h_baru = st.number_input("Harga", min_value=0, step=500)
-                s_baru = st.number_input("Stok Awal", min_value=0, step=1)
-                if st.form_submit_button("Simpan Produk"):
-                    max_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM produk").fetchone()[0]
-                    con.execute("INSERT INTO produk VALUES (?, ?, ?, ?)", [int(max_id), n_baru, h_baru, s_baru])
-                    st.success("Produk berhasil ditambah!")
-                    st.rerun()
-
-        with tab2:
-            st.write("### Edit Detail Produk")
-            if not df_produk.empty:
-                # Pilih produk yang mau diedit
-                pilihan_nama = st.selectbox("Pilih Produk yang akan diubah:", df_produk['nama_produk'])
-                data_lama = df_produk[df_produk['nama_produk'] == pilihan_nama].iloc[0]
-                
-                # Form Edit dengan nilai awal dari data lama
-                with st.form("form_edit_detail"):
-                    nama_edit = st.text_input("Nama Produk", value=data_lama['nama_produk'])
-                    harga_edit = st.number_input("Harga Jual", value=float(data_lama['harga']), step=500.0)
-                    stok_edit = st.number_input("Jumlah Stok", value=int(data_lama['stok']), step=1)
+        with col_tambah:
+            with st.expander("➕ Tambah Barang Baru"):
+                with st.form("form_tambah_barang"):
+                    nama_baru = st.text_input("Nama Produk Baru")
+                    harga_baru = st.number_input("Harga Jual (Rp)", min_value=0, step=500)
+                    stok_awal = st.number_input("Stok Awal", min_value=0, step=1)
+                    btn_tambah = st.form_submit_button("Simpan Barang")
                     
-                    if st.form_submit_button("Simpan Perubahan"):
-                        con.execute("""
-                            UPDATE produk 
-                            SET nama_produk = ?, harga = ?, stok = ? 
-                            WHERE id = ?
-                        """, [str(nama_edit), float(harga_edit), int(stok_edit), int(data_lama['id'])])
+                    if btn_tambah and nama_baru:
+                        # 1. Cari ID terakhir untuk menentukan ID baru
+                        max_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM produk").fetchone()[0]
                         
-                        st.success(f"Berhasil memperbarui {pilihan_nama}!")
+                        # 2. Masukkan ke database
+                        con.execute("""
+                            INSERT INTO produk (id, nama_produk, harga, stok) 
+                            VALUES (?, ?, ?, ?)
+                        """, [int(max_id), str(nama_baru), float(harga_baru), int(stok_awal)])
+                        
+                        st.success(f"Berhasil menambahkan {nama_baru}!")
                         st.rerun()
-            else:
-                st.info("Belum ada produk untuk diedit.")
 
-        with tab3:
-            # Fitur update stok cepat (tambah/kurang) yang sudah kita buat sebelumnya
-            with st.form("form_update_stok"):
-                st.write("### Update Stok Cepat (+/-)")
-                prod_target = st.selectbox("Pilih Produk", df_produk['nama_produk'] if not df_produk.empty else ["Kosong"])
-                qty_ubah = st.number_input("Jumlah Perubahan", step=1)
-                if st.form_submit_button("Update Stok"):
-                    con.execute("UPDATE produk SET stok = stok + ? WHERE nama_produk = ?", [int(qty_ubah), str(prod_target)])
-                    st.success("Stok berhasil diperbarui!")
-                    st.rerun()
+        with col_update:
+            with st.expander("🔄 Update Stok (Barang Eksis)"):
+                if not df_produk.empty:
+                    with st.form("form_update_stok"):
+                        prod_edit = st.selectbox("Pilih Produk", df_produk['nama_produk'])
+                        stok_tambahan = st.number_input("Jumlah Perubahan Stok (+/-)", step=1)
+                        btn_update = st.form_submit_button("Update Stok")
+                        
+                        if btn_update:
+                            con.execute("UPDATE produk SET stok = stok + ? WHERE nama_produk = ?", 
+                                        [int(stok_tambahan), str(prod_edit)])
+                            st.success(f"Stok {prod_edit} berhasil diperbarui!")
+                            st.rerun()
+                else:
+                    st.info("Belum ada barang di database.")
 
     elif menu_admin == "Data Transaksi":
         st.subheader("📝 Histori Transaksi Lengkap")
