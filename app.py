@@ -54,10 +54,14 @@ def cashier_ui():
                 total = harga_satuan * jumlah
                 # 1. Update Stok
                 con.execute("UPDATE produk SET stok = stok - ? WHERE nama_produk = ?", [jumlah, item])
-                # 2. Catat Transaksi
-                id_tx = datetime.now().strftime("%Y%m%d%H%M%S")
-                con.execute("INSERT INTO transaksi VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)", 
-                            [id_tx, item, jumlah, total, st.session_state.username])
+                # Masukkan waktu dari Python saja agar lebih pasti
+                waktu_sekarang = datetime.now()
+
+                # Gunakan nama kolom secara spesifik (Explicit Insert)
+                con.execute("""
+                    INSERT INTO transaksi (id_transaksi, nama_produk, jumlah, total_harga, kasir, waktu) 
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, [id_tx, item, jumlah, total, st.session_state.username, waktu_sekarang])
                 st.success(f"Transaksi Berhasil! Total: Rp{total:,.0f}")
             else:
                 st.error("Maaf, Stok tidak mencukupi!")
