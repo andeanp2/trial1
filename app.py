@@ -40,20 +40,20 @@ def login_ui():
 
 # --- HALAMAN KASIR (INPUT TRANSAKSI) ---
 def cashier_ui():
-    st.header(f"🛒 Kasir: {st.session_state.username}")
-    
-    # 1. AMBIL DATA PRODUK DENGAN PENGAMAN (PASTE DI SINI)
     try:
-        # Mencoba mengambil data lengkap
-        df_produk = con.execute("SELECT id, nama_produk, harga, stok, terakhir_diupdate FROM produk ORDER BY id ASC").df()
-    except Exception as e:
-        # Jika kolom 'terakhir_diupdate' belum ada/error, gunakan query standar
-        df_produk = con.execute("SELECT id, nama_produk, harga, stok FROM produk ORDER BY id ASC").df()
+        df_produk = con.execute("SELECT * FROM produk").df()
+    except:
+        df_produk = pd.DataFrame() # Jika error, buat dataframe kosong
 
-    # 2. CEK APAKAH TABEL KOSONG
+    # --- TAMBAHKAN BARIS INI UNTUK DEBUG ---
+    st.write("Debug: Jumlah baris di database =", len(df_produk))
+    if not df_produk.empty:
+        st.write("Daftar kolom:", df_produk.columns.tolist())
+    # ---------------------------------------
+
     if df_produk.empty:
         st.warning("Data produk masih kosong. Silakan hubungi Admin untuk isi stok.")
-        return # Berhenti di sini agar tidak error di bawah
+        return
 
     # 3. LANJUT KE UI INPUT (Keranjang dll)
     # ... sisa kode kasir Anda ...
