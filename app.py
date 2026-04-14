@@ -89,30 +89,38 @@ def cashier_ui():
 
     # --- FITUR BARU: RIWAYAT HARIAN KASIR ---
     st.divider()
-    st.subheader("📜 Riwayat Transaksi Anda Hari Ini")
+    st.subheader("📜 Riwayat Struk Hari Ini")
     
-    # Query mengambil data hanya untuk kasir aktif dan hanya hari ini
-    query_history = """
-        SELECT waktu, id_transaksi, nama_produk, jumlah, total_harga 
+    # Query: Mengelompokkan berdasarkan ID Transaksi agar muncul per struk
+    query_per_struk = """
+        SELECT 
+            id_transaksi, 
+            MAX(waktu) as jam, 
+            SUM(total_harga) as total_nota,
+            COUNT(nama_produk) as jenis_barang
         FROM transaksi 
         WHERE kasir = ? AND CAST(waktu AS DATE) = CURRENT_DATE
-        ORDER BY waktu DESC
+        GROUP BY id_transaksi
+        ORDER BY jam DESC
     """
-    df_history = con.execute(query_history, [str(st.session_state.username)]).df()
+    df_struk = con.execute(query_per_struk, [str(st.session_state.username)]).df()
 
-    if not df_history.empty:
-        # Ringkasan Kecil
-        total_omzet_harian = df_history['total_harga'].sum()
-        total_item_terjual = df_history['jumlah'].sum()
-        
-        c1, c2 = st.columns(2)
-        c1.metric("Omzet Anda Hari Ini", f"Rp{total_omzet_harian:,.0f}")
-        c2.metric("Item Terjual", f"{total_item_terjual} unit")
-        
-        # Tabel Riwayat
-        st.dataframe(df_history, use_container_width=True)
+    if not df_struk.empty:
+        # Ringkasan Omzet Tetap Ada
+        total_omzet = df_struk['total_nota'].sum()
+        st.metric("Total Omzet Anda Hari Ini", f"Rp{total_omzet:,.0f}")
+
+        # Tampilkan per Transaksi menggunakan Expander agar bisa di-klik detailnya
+        for index, row in df_struk.iterrows():
+            with st.expander(f"📄 No. Struk: {row['id_transaksi']} | 🕒 {row['jam'].strftime('%H:%M')} | Total: Rp{row['total_nota']:,.0f}"):
+                # Ambil detail barang untuk struk ini saja
+                detail_query = "SELECT nama_produk, jumlah, total_harga FROM transaksi WHERE id_transaksi = ?"
+                df_detail = con.execute(detail_query, [row['id_transaksi']]).df()
+                
+                st.table(df_detail)
+                st.write(f"**Jumlah Jenis Barang:** {row['jenis_barang']}")
     else:
-        st.write("Belum ada transaksi hari ini.")
+        st.write("Belum ada transaksi diproses hari ini.")
 
 # --- HALAMAN ADMIN (UPDATE STOK & DASHBOARD) ---
 def admin_ui():
