@@ -2,3 +2,4 @@ streamlit
 duckdb==1.5.1
 pandas
 plotly
+pytz
