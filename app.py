@@ -1,7 +1,7 @@
 import streamlit as st
 import duckdb
 import pandas as pd
-import pytz # Tambahkan ini
+import pytz 
 from datetime import datetime
 
 # Fungsi untuk mendapatkan waktu WIB sekarang
@@ -188,6 +188,7 @@ def cashier_ui():
 
 # --- HALAMAN ADMIN (UPDATE STOK & DASHBOARD) ---
 def admin_ui():
+    now = get_wib_now()
     st.title("🏗️ Panel Admin")
     menu_admin = st.sidebar.selectbox("Menu Admin", ["Dashboard Utama", "Manajemen Stok", "Data Transaksi"])
     
