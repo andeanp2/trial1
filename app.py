@@ -77,7 +77,7 @@ def cashier_ui():
             for i, barang in enumerate(st.session_state.cart):
                 c1, c2, c3 = st.columns([3, 2, 1])
                 c1.write(f"**{barang['nama']}** \n{barang['qty']} x Rp{barang['harga']:,.0f}")
-                c2.write(f"  \nRp{barang['subtotal']:,.0f}")
+                c2.write(f"  \nRp{barang.get('subtotal', 0):,.0f}")
                 # Tombol hapus spesifik per baris
                 if c3.button("🗑️", key=f"del_{i}"):
                     st.session_state.cart.pop(i)
