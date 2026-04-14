@@ -113,35 +113,47 @@ def cashier_ui():
     # (Bagian Riwayat Harian tetap di bawah sini)
 
     # --- FITUR BARU: RIWAYAT HARIAN KASIR ---
+    def cashier_ui():
+    # ... (kode keranjang belanja Anda) ...
+
     st.divider()
     
+    # 1. BUAT DULU UI UNTUK LIMIT
     col_head, col_opt = st.columns([2, 2])
     with col_head:
         st.subheader("📜 Riwayat Struk Hari Ini")
     
     with col_opt:
-        # Dropdown untuk memilih jumlah baris yang tampil
         opsi_limit = [5, 10, 20, 50, "Semua"]
-        pilihan_limit = st.selectbox("Tampilkan maksimal:", opsi_limit, index=1) # Default index 1 (yaitu 10)
+        pilihan_limit = st.selectbox("Tampilkan maksimal:", opsi_limit, index=1)
+        
+        # DISINI VARIABEL limit_sql DIBUAT
+        if pilihan_limit == "Semua":
+            limit_sql = ""
+        else:
+            limit_sql = f"LIMIT {pilihan_limit}"
 
-    # Ambil tanggal WIB sekarang untuk filter
+    # 2. AMBIL TANGGAL WIB
     tgl_wib_ini = get_wib_now().strftime("%Y-%m-%d")
 
+    # 3. BARU GUNAKAN limit_sql DI DALAM QUERY
     query_tabel = f"""
         SELECT 
             id_transaksi AS "ID Struk", 
             MAX(waktu) AS "Jam", 
-            SUM(total_harga) AS "Total Belanja"
+            SUM(total_harga) AS "Total Belanja",
+            COUNT(nama_produk) AS "Jenis Barang"
         FROM transaksi 
-        WHERE kasir = ? AND CAST(waktu AS DATE) = ?  -- Gunakan parameter ? untuk tanggal
+        WHERE kasir = ? AND CAST(waktu AS DATE) = ? 
         GROUP BY id_transaksi
         ORDER BY "Jam" DESC
         {limit_sql}
     """
     
-    # Masukkan tgl_wib_ini ke dalam execute
+    # 4. EKSEKUSI
     df_struk = con.execute(query_tabel, [str(st.session_state.username), tgl_wib_ini]).df()
-
+    
+    # ... (tampilkan tabel) ...
     if not df_struk.empty:
         # Hitung omzet harian (selalu hitung total hari ini, tidak terpengaruh limit dropdown)
         total_omzet = con.execute(
