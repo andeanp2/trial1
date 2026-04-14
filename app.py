@@ -37,7 +37,6 @@ def login_ui():
 def cashier_ui():
     st.header(f"🛒 Kasir: {st.session_state.username}")
     
-    # --- LOGIKA KERANJANG (Sama seperti sebelumnya) ---
     if "cart" not in st.session_state:
         st.session_state.cart = []
 
@@ -56,22 +55,39 @@ def cashier_ui():
                 row = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
                 if int(row['stok']) >= qty_pilih:
                     st.session_state.cart.append({
-                        "nama": item_pilih, "qty": int(qty_pilih),
-                        "harga": float(row['harga']), "subtotal": float(row['harga'] * qty_pilih)
+                        "nama": item_pilih, 
+                        "qty": int(qty_pilih),
+                        "harga": float(row['harga']), 
+                        "subtotal": float(row['harga'] * qty_pilih)
                     })
-                    st.toast(f"{item_pilih} masuk!")
+                    st.toast(f"{item_pilih} ditambah!")
                 else:
                     st.error("Stok habis!")
 
     with col_cart:
         st.subheader("Isi Keranjang")
         if st.session_state.cart:
-            df_cart = pd.DataFrame(st.session_state.cart)
-            st.table(df_cart)
-            total_bayar = df_cart['subtotal'].sum()
+            # --- TAMPILAN KERANJANG INTERAKTIF ---
+            total_bayar = 0
+            for i, barang in enumerate(st.session_state.cart):
+                c1, c2, c3 = st.columns([3, 2, 1])
+                c1.write(f"**{barang['nama']}** \n{barang['qty']} x Rp{barang['harga']:,.0f}")
+                c2.write(f"  \nRp{barang['subtotal']:,.0f}")
+                # Tombol hapus spesifik per baris
+                if c3.button("🗑️", key=f"del_{i}"):
+                    st.session_state.cart.pop(i)
+                    st.rerun()
+                total_bayar += barang['subtotal']
+            
+            st.divider()
             st.write(f"### TOTAL: Rp{total_bayar:,.0f}")
             
-            if st.button("✅ PROSES TRANSAKSI"):
+            c1, c2 = st.columns(2)
+            if c1.button("🧹 Kosongkan"):
+                st.session_state.cart = []
+                st.rerun()
+
+            if c2.button("✅ PROSES TRANSAKSI"):
                 id_tx = str(datetime.now().strftime("%Y%m%d%H%M%S"))
                 waktu_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 for b in st.session_state.cart:
@@ -81,11 +97,13 @@ def cashier_ui():
                         VALUES (?, ?, ?, ?, ?, ?)
                     """, [id_tx, b['nama'], b['qty'], b['subtotal'], str(st.session_state.username), waktu_str])
                 
-                st.success("Berhasil!")
+                st.success("Transaksi Berhasil!")
                 st.session_state.cart = []
                 st.rerun()
         else:
             st.info("Keranjang kosong.")
+
+    # (Bagian Riwayat Harian tetap di bawah sini)
 
     # --- FITUR BARU: RIWAYAT HARIAN KASIR ---
     st.divider()
