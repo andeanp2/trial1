@@ -23,19 +23,16 @@ con = get_connection()
 
 # --- INISIALISASI DATABASE (OTOMATIS) ---
 def init_db():
-    # Jalankan perintah satu per satu agar tidak error InvalidInput
+    # 1. Buat Tabel (Gunakan satu per satu execute agar aman)
     con.execute("CREATE TABLE IF NOT EXISTS produk (id INTEGER PRIMARY KEY, nama_produk VARCHAR, harga DOUBLE, stok INTEGER, terakhir_diupdate TIMESTAMP)")
-    
     con.execute("CREATE TABLE IF NOT EXISTS transaksi (id_transaksi VARCHAR, kasir VARCHAR, waktu TIMESTAMP, nama_produk VARCHAR, jumlah INTEGER, harga_satuan DOUBLE, total_harga DOUBLE)")
-    
     con.execute("CREATE TABLE IF NOT EXISTS log_stok (id_log INTEGER PRIMARY KEY, id_produk INTEGER, nama_produk VARCHAR, stok_awal INTEGER, perubahan INTEGER, keterangan VARCHAR, waktu TIMESTAMP)")
-    
     con.execute("CREATE TABLE IF NOT EXISTS users (username VARCHAR PRIMARY KEY, password VARCHAR, role VARCHAR)")
     
-    # Cek jika user admin belum ada
-    user_exists = con.execute("SELECT * FROM users WHERE username = 'admin'").fetchone()
-    if not user_exists:
-        con.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin'), ('kasir1', '123', 'kasir')")
+    # 2. Masukkan User Default menggunakan INSERT OR IGNORE
+    # Ini tidak akan error meskipun aplikasi di-refresh berkali-kali
+    con.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin')")
+    con.execute("INSERT OR IGNORE INTO users VALUES ('kasir1', '123', 'kasir')")
 
 init_db()
 
