@@ -85,12 +85,13 @@ def cashier_ui():
             if btn_add:
                 produk_data = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
                 if produk_data['stok'] >= qty_pilih:
+                    # Pastikan nama key-nya "subtotal" (huruf kecil semua)
                     st.session_state.cart.append({
                         "id": int(produk_data['id']),
                         "nama": item_pilih,
                         "harga": float(produk_data['harga']),
                         "qty": int(qty_pilih),
-                        "subtotal": float(qty_pilih * produk_data['harga'])
+                        "subtotal": float(qty_pilih * produk_data['harga']) # <-- Harus sama dengan yang di sum()
                     })
                     st.rerun()
                 else:
@@ -99,7 +100,7 @@ def cashier_ui():
     with col_cart:
         st.subheader("Isi Keranjang")
         if st.session_state.cart:
-            total_bayar = sum(item['subtotal'] for item in st.session_state.cart)
+            total_bayar = sum(item.get('subtotal', 0) for item in st.session_state.cart)
             
             for i, barang in enumerate(st.session_state.cart):
                 with st.container(border=True):
