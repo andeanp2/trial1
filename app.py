@@ -1,7 +1,7 @@
 import streamlit as st
 import duckdb
 import pandas as pd
-import pytz 
+import pytz # Tambahkan ini
 from datetime import datetime
 
 # Fungsi untuk mendapatkan waktu WIB sekarang
@@ -188,34 +188,25 @@ def cashier_ui():
 
 # --- HALAMAN ADMIN (UPDATE STOK & DASHBOARD) ---
 def admin_ui():
-    now = get_wib_now()
     st.title("🏗️ Panel Admin")
     menu_admin = st.sidebar.selectbox("Menu Admin", ["Dashboard Utama", "Manajemen Stok", "Data Transaksi"])
     
-    # --- DI DALAM admin_ui() ---
     if menu_admin == "Dashboard Utama":
         st.subheader("📊 Ringkasan Bisnis")
         col1, col2 = st.columns(2)
-    
-        # 1. Ambil Pendapatan (Cara Aman)
-        res_p = con.execute("SELECT SUM(total_harga) FROM transaksi").fetchone()
-        # Jika res_p ada dan isinya bukan None, ambil index [0]. Jika tidak, beri 0.
-        total_penjualan = res_p[0] if res_p and res_p[0] is not None else 0
-    
-        # 2. Ambil Total Stok (Cara Aman)
-        res_s = con.execute("SELECT SUM(stok) FROM produk").fetchone()
-        total_stok = res_s[0] if res_s and res_s[0] is not None else 0
-    
+        
+        # Metric Sederhana
+        total_penjualan = con.execute("SELECT SUM(total_harga) FROM transaksi").fetchone()[0] or 0
+        total_stok = con.execute("SELECT SUM(stok) FROM produk").fetchone()[0] or 0
+        
         col1.metric("Total Pendapatan", f"Rp{total_penjualan:,.0f}")
         col2.metric("Total Stok Barang", f"{total_stok} unit")
         
-        # --- Grafik Penjualan (Hanya muncul jika ada data) ---
+        # Grafik Penjualan (Plotly)
         df_tx = con.execute("SELECT * FROM transaksi").df()
         if not df_tx.empty:
             fig = px.bar(df_tx, x='waktu', y='total_harga', title="Tren Penjualan", color='nama_produk')
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Belum ada data transaksi untuk ditampilkan di grafik.")
 
     elif menu_admin == "Manajemen Stok":
         st.subheader("📦 Manajemen Gudang & Stok")
