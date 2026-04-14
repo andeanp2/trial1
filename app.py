@@ -115,6 +115,9 @@ def cashier_ui():
     # --- FITUR BARU: RIWAYAT HARIAN KASIR ---
     def cashier_ui():
     # ... (kode keranjang belanja Anda) ...
+        # Baris ini harus menjorok ke dalam (4 spasi atau 1 tab)
+        tz_wib = pytz.timezone('Asia/Jakarta')
+        return datetime.now(tz_wib)
 
     st.divider()
     
