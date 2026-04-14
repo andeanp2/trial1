@@ -57,6 +57,7 @@ def cashier_ui():
             btn_add = st.form_submit_button("➕ Tambah")
 
             if btn_add:
+                print(f"DEBUG: Harga={produk_data['harga']}, Qty={qty_pilih}, Subtotal={qty_pilih * produk_data['harga']}")
                 row = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
                 if int(row['stok']) >= qty_pilih:
                     st.session_state.cart.append({
