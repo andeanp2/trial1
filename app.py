@@ -64,24 +64,34 @@ def cashier_ui():
     
     with col_input:
         st.subheader("Pilih Barang")
+        
+        # Mulai Form
         with st.form("form_add_to_cart", clear_on_submit=True):
-            # Gunakan list nama_produk untuk selectbox
             item_pilih = st.selectbox("Produk", df_produk['nama_produk'].tolist())
             qty_pilih = st.number_input("Jumlah", min_value=1, step=1)
-            # ... dst
+            
+            # --- INI BARIS YANG HILANG/BELUM ADA ---
+            btn_add = st.form_submit_button("➕ Tambah ke Keranjang")
+            # ----------------------------------------
 
+            # Logika saat tombol ditekan
             if btn_add:
-                row = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
-                if int(row['stok']) >= qty_pilih:
+                # Ambil data produk yang dipilih dari dataframe
+                produk_data = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
+                
+                # Cek apakah stok cukup
+                if produk_data['stok'] >= qty_pilih:
                     st.session_state.cart.append({
-                        "nama": item_pilih, 
-                        "qty": int(qty_pilih),
-                        "harga": float(row['harga']), 
-                        "subtotal": float(row['harga'] * qty_pilih)
+                        "id": produk_data['id'],
+                        "nama": item_pilih,
+                        "harga": produk_data['harga'],
+                        "qty": qty_pilih,
+                        "total": qty_pilih * produk_data['harga']
                     })
-                    st.toast(f"{item_pilih} ditambah!")
+                    st.success(f"Masuk keranjang: {item_pilih}")
+                    st.rerun()
                 else:
-                    st.error("Stok habis!")
+                    st.error(f"Stok tidak cukup! (Sisa: {produk_data['stok']})")
 
     with col_cart:
         st.subheader("Isi Keranjang")
