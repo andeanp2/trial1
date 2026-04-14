@@ -45,7 +45,11 @@ def cashier_ui():
     if "cart" not in st.session_state:
         st.session_state.cart = []
 
-    df_produk = con.execute("SELECT * FROM produk").df()
+    df_produk = con.execute("SELECT id, nama_produk, harga, stok, terakhir_diupdate FROM produk ORDER BY id ASC").df()
+    st.dataframe(
+        df_produk.style.format({"terakhir_diupdate": lambda t: t.strftime('%d/%m %H:%M') if pd.notnull(t) else "-"}),
+        use_container_width=True
+    )
 
     col_input, col_cart = st.columns([1, 2])
 
@@ -98,15 +102,23 @@ def cashier_ui():
                 waktu_str = wib_now.strftime("%Y-%m-%d %H:%M:%S")
                 tgl_hari_ini = wib_now.strftime("%Y-%m-%d") # Untuk filter history nanti
                 for b in st.session_state.cart:
-                    con.execute("UPDATE produk SET stok = stok - ? WHERE nama_produk = ?", [b['qty'], b['nama']])
+                    wib_skrg = get_wib_now()
+                    # 1. Ambil stok lama sebelum dikurangi
+                    stok_lama = con.execute("SELECT stok FROM produk WHERE nama_produk = ?", [b['nama']]).fetchone()[0]
+                    stok_baru = stok_lama - b['qty']
+
+                    # 2. Update stok dan waktu di tabel produk
                     con.execute("""
-                        INSERT INTO transaksi (id_transaksi, nama_produk, jumlah, total_harga, kasir, waktu) 
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, [id_tx, b['nama'], b['qty'], b['subtotal'], str(st.session_state.username), waktu_str])
-                
-                st.success("Transaksi Berhasil!")
-                st.session_state.cart = []
-                st.rerun()
+                        UPDATE produk 
+                        SET stok = ?, terakhir_diupdate = ? 
+                        WHERE nama_produk = ?
+                    """, [stok_baru, wib_skrg, b['nama']])
+
+                    # 3. Catat ke log_stok (Audit Trail)
+                    max_id_log = con.execute("SELECT COALESCE(MAX(id_log), 0) + 1 FROM log_stok").fetchone()[0]
+                    con.execute("""
+                        INSERT INTO log_stok VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, [int(max_id_log), None, b['nama'], int(stok_lama), int(stok_baru), "Transaksi Kasir", wib_skrg])
         else:
             st.info("Keranjang kosong.")
 
@@ -281,9 +293,20 @@ def admin_ui():
                 prod_target = st.selectbox("Pilih Produk", df_produk['nama_produk'] if not df_produk.empty else ["Kosong"])
                 qty_ubah = st.number_input("Jumlah Perubahan", step=1)
                 if st.form_submit_button("Update Stok"):
-                    con.execute("UPDATE produk SET stok = stok + ? WHERE nama_produk = ?", [int(qty_ubah), str(prod_target)])
-                    st.success("Stok berhasil diperbarui!")
-                    st.rerun()
+                    wib_skrg = get_wib_now()
+                    row = con.execute("SELECT id, stok FROM produk WHERE nama_produk = ?", [str(prod_target)]).fetchone()
+                    stok_awal = row[1]
+                    stok_akhir = stok_awal + int(qty_ubah)
+
+                    con.execute("""
+                        UPDATE produk SET stok = ?, terakhir_diupdate = ? WHERE nama_produk = ?
+                    """, [stok_akhir, wib_skrg, str(prod_target)])
+
+                    # Catat log
+                    max_id_log = con.execute("SELECT COALESCE(MAX(id_log), 0) + 1 FROM log_stok").fetchone()[0]
+                    con.execute("""
+                        INSERT INTO log_stok VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, [int(max_id_log), int(row[0]), str(prod_target), int(stok_awal), int(stok_akhir), "Update Manual Admin", wib_skrg])
 
         with tab4:
             st.write("### ⚠️ Hapus Produk dari Sistem")
