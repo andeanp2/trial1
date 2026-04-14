@@ -1,8 +1,13 @@
 import streamlit as st
 import duckdb
 import pandas as pd
-import plotly.express as px
+import pytz # Tambahkan ini
 from datetime import datetime
+
+# Fungsi untuk mendapatkan waktu WIB sekarang
+def get_wib_now():
+    tz_wib = pytz.timezone('Asia/Jakarta')
+    return datetime.now(tz_wib)
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Sistem Kasir Pro v1", layout="wide")
