@@ -222,47 +222,58 @@ def admin_ui():
         
         # Ambil data produk terbaru
         df_produk = con.execute("SELECT * FROM produk ORDER BY id ASC").df()
-        st.dataframe(df_produk, use_container_width=True)
+        st.dataframe(df_produk, use_container_width=True, hide_index=True)
         
-        # Kita bagi menjadi dua kolom untuk aksi
-        col_tambah, col_update = st.columns(2)
+        # TAB untuk memisahkan aksi agar rapi
+        tab1, tab2, tab3 = st.tabs(["➕ Tambah Baru", "✏️ Edit Produk", "🔄 Update Stok Cepat"])
         
-        with col_tambah:
-            with st.expander("➕ Tambah Barang Baru"):
-                with st.form("form_tambah_barang"):
-                    nama_baru = st.text_input("Nama Produk Baru")
-                    harga_baru = st.number_input("Harga Jual (Rp)", min_value=0, step=500)
-                    stok_awal = st.number_input("Stok Awal", min_value=0, step=1)
-                    btn_tambah = st.form_submit_button("Simpan Barang")
-                    
-                    if btn_tambah and nama_baru:
-                        # 1. Cari ID terakhir untuk menentukan ID baru
-                        max_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM produk").fetchone()[0]
-                        
-                        # 2. Masukkan ke database
-                        con.execute("""
-                            INSERT INTO produk (id, nama_produk, harga, stok) 
-                            VALUES (?, ?, ?, ?)
-                        """, [int(max_id), str(nama_baru), float(harga_baru), int(stok_awal)])
-                        
-                        st.success(f"Berhasil menambahkan {nama_baru}!")
-                        st.rerun()
+        with tab1:
+            with st.form("form_tambah"):
+                st.write("### Tambah Produk Baru")
+                n_baru = st.text_input("Nama Produk")
+                h_baru = st.number_input("Harga", min_value=0, step=500)
+                s_baru = st.number_input("Stok Awal", min_value=0, step=1)
+                if st.form_submit_button("Simpan Produk"):
+                    max_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM produk").fetchone()[0]
+                    con.execute("INSERT INTO produk VALUES (?, ?, ?, ?)", [int(max_id), n_baru, h_baru, s_baru])
+                    st.success("Produk berhasil ditambah!")
+                    st.rerun()
 
-        with col_update:
-            with st.expander("🔄 Update Stok (Barang Eksis)"):
-                if not df_produk.empty:
-                    with st.form("form_update_stok"):
-                        prod_edit = st.selectbox("Pilih Produk", df_produk['nama_produk'])
-                        stok_tambahan = st.number_input("Jumlah Perubahan Stok (+/-)", step=1)
-                        btn_update = st.form_submit_button("Update Stok")
+        with tab2:
+            st.write("### Edit Detail Produk")
+            if not df_produk.empty:
+                # Pilih produk yang mau diedit
+                pilihan_nama = st.selectbox("Pilih Produk yang akan diubah:", df_produk['nama_produk'])
+                data_lama = df_produk[df_produk['nama_produk'] == pilihan_nama].iloc[0]
+                
+                # Form Edit dengan nilai awal dari data lama
+                with st.form("form_edit_detail"):
+                    nama_edit = st.text_input("Nama Produk", value=data_lama['nama_produk'])
+                    harga_edit = st.number_input("Harga Jual", value=float(data_lama['harga']), step=500.0)
+                    stok_edit = st.number_input("Jumlah Stok", value=int(data_lama['stok']), step=1)
+                    
+                    if st.form_submit_button("Simpan Perubahan"):
+                        con.execute("""
+                            UPDATE produk 
+                            SET nama_produk = ?, harga = ?, stok = ? 
+                            WHERE id = ?
+                        """, [str(nama_edit), float(harga_edit), int(stok_edit), int(data_lama['id'])])
                         
-                        if btn_update:
-                            con.execute("UPDATE produk SET stok = stok + ? WHERE nama_produk = ?", 
-                                        [int(stok_tambahan), str(prod_edit)])
-                            st.success(f"Stok {prod_edit} berhasil diperbarui!")
-                            st.rerun()
-                else:
-                    st.info("Belum ada barang di database.")
+                        st.success(f"Berhasil memperbarui {pilihan_nama}!")
+                        st.rerun()
+            else:
+                st.info("Belum ada produk untuk diedit.")
+
+        with tab3:
+            # Fitur update stok cepat (tambah/kurang) yang sudah kita buat sebelumnya
+            with st.form("form_update_stok"):
+                st.write("### Update Stok Cepat (+/-)")
+                prod_target = st.selectbox("Pilih Produk", df_produk['nama_produk'] if not df_produk.empty else ["Kosong"])
+                qty_ubah = st.number_input("Jumlah Perubahan", step=1)
+                if st.form_submit_button("Update Stok"):
+                    con.execute("UPDATE produk SET stok = stok + ? WHERE nama_produk = ?", [int(qty_ubah), str(prod_target)])
+                    st.success("Stok berhasil diperbarui!")
+                    st.rerun()
 
     elif menu_admin == "Data Transaksi":
         st.subheader("📝 Histori Transaksi Lengkap")
