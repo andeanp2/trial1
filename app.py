@@ -241,7 +241,7 @@ def admin_ui():
                 if not df_produk.empty:
                     with st.form("form_hapus_produk"):
                         prod_hapus = st.selectbox("Pilih Produk yang akan Dihapus", df_produk['nama_produk'], key="sel_del")
-                        st.warning("⚠️ Tindakan ini tidak dapat dibatalkan!")
+                        #st.warning("⚠️ Tindakan ini tidak dapat dibatalkan!")
                         konfirmasi = st.checkbox("Saya yakin ingin menghapus produk ini")
                         btn_hapus = st.form_submit_button("Hapus Permanen", type="primary")
                         
