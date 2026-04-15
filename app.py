@@ -205,26 +205,32 @@ def admin_ui():
             with st.expander("➕ Tambah Barang Baru"):
                 with st.form("form_tambah_barang", clear_on_submit=True):
                     nama_baru = st.text_input("Nama Produk Baru").strip()
+                
+                    # --- FITUR BARU: PILIH KATEGORI ---
+                    kat_pilihan = st.selectbox("Kategori", ["Makanan", "Minuman", "Fashion"])
+                
                     harga_baru = st.number_input("Harga Jual (Rp)", min_value=0, step=500)
                     stok_awal = st.number_input("Stok Awal", min_value=0, step=1)
                     btn_tambah = st.form_submit_button("Simpan Barang")
-                    
+                
                     if btn_tambah and nama_baru:
-                        # Proteksi Duplikat (Huruf Besar/Kecil dianggap sama)
+                        # Proteksi Duplikat
                         produk_eksis = con.execute(
                             "SELECT nama_produk FROM produk WHERE LOWER(nama_produk) = LOWER(?)", 
                             [nama_baru]
                         ).fetchone()
-                        
+                    
                         if produk_eksis:
                             st.error(f"❌ Produk '{nama_baru}' sudah ada!")
                         else:
                             max_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM produk").fetchone()[0]
+                            # Tambahkan kategori ke dalam query INSERT
                             con.execute("""
-                                INSERT INTO produk (id, nama_produk, harga, stok) 
-                                VALUES (?, ?, ?, ?)
-                            """, [int(max_id), str(nama_baru), float(harga_baru), int(stok_awal)])
-                            st.success(f"Berhasil menambah {nama_baru}!")
+                                INSERT INTO produk (id, nama_produk, kategori, harga, stok) 
+                                VALUES (?, ?, ?, ?, ?)
+                            """, [int(max_id), str(nama_baru), kat_pilihan, float(harga_baru), int(stok_awal)])
+                        
+                            st.success(f"Berhasil menambah {nama_baru} ke kategori {kat_pilihan}!")
                             st.rerun()
 
         with col_update:
