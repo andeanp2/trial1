@@ -202,21 +202,34 @@ def admin_ui():
         # 1. FITUR TAMBAH BARANG
         with col_tambah:
             with st.expander("➕ Tambah Barang Baru"):
-                with st.form("form_tambah_barang"):
-                    nama_baru = st.text_input("Nama Produk Baru")
+                with st.form("form_tambah_barang", clear_on_submit=True):
+                    nama_baru = st.text_input("Nama Produk Baru").strip() # .strip() untuk hapus spasi di awal/akhir
                     harga_baru = st.number_input("Harga Jual (Rp)", min_value=0, step=500)
                     stok_awal = st.number_input("Stok Awal", min_value=0, step=1)
                     btn_tambah = st.form_submit_button("Simpan Barang")
                     
                     if btn_tambah and nama_baru:
-                        max_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM produk").fetchone()[0]
-                        con.execute("""
-                            INSERT INTO produk (id, nama_produk, harga, stok) 
-                            VALUES (?, ?, ?, ?)
-                        """, [int(max_id), str(nama_baru), float(harga_baru), int(stok_awal)])
+                        # 1. CEK APAKAH NAMA SUDAH ADA (Case-Insensitive)
+                        # Kita gunakan LOWER() agar 'Kopi' dan 'kopi' dianggap sama
+                        produk_eksis = con.execute(
+                            "SELECT nama_produk FROM produk WHERE LOWER(nama_produk) = LOWER(?)", 
+                            [nama_baru]
+                        ).fetchone()
                         
-                        st.success(f"Berhasil menambahkan {nama_baru}!")
-                        st.rerun()
+                        if produk_eksis:
+                            st.error(f"❌ Gagal! Produk dengan nama '{nama_baru}' sudah ada di database.")
+                            st.info("Saran: Gunakan fitur 'Update Stok' jika hanya ingin menambah jumlah barang.")
+                        else:
+                            # 2. Jika belum ada, baru cari ID terakhir dan masukkan
+                            max_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM produk").fetchone()[0]
+                            
+                            con.execute("""
+                                INSERT INTO produk (id, nama_produk, harga, stok) 
+                                VALUES (?, ?, ?, ?)
+                            """, [int(max_id), str(nama_baru), float(harga_baru), int(stok_awal)])
+                            
+                            st.success(f"✅ Berhasil menambahkan {nama_baru}!")
+                            st.rerun()
 
         # 2. FITUR UPDATE STOK
         with col_update:
