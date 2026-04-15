@@ -46,6 +46,18 @@ def cashier_ui():
 
     with col_input:
         st.subheader("Pilih Barang")
+        # Ambil list kategori unik untuk filter
+        list_kategori = ["Semua"] + list(df_produk['kategori'].unique())
+        filter_kat = st.selectbox("Filter Kategori", list_kategori)
+
+        if filter_kat == "Semua":
+            df_display = df_produk
+        else:
+            df_display = df_produk[df_produk['kategori'] == filter_kat]
+
+        # Gunakan df_display untuk selectbox produk
+        item_pilih = st.selectbox("Produk", df_display['nama_produk'])
+
         with st.form("form_add_to_cart", clear_on_submit=True):
             item_pilih = st.selectbox("Produk", df_produk['nama_produk'])
             qty_pilih = st.number_input("Jumlah", min_value=1, step=1)
