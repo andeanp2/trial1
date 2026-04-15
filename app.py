@@ -192,81 +192,75 @@ def admin_ui():
     elif menu_admin == "Manajemen Stok":
         st.subheader("📦 Manajemen Gudang & Stok")
         
-        # Ambil data produk terbaru
-        df_produk = con.execute("SELECT * FROM produk ORDER BY id ASC").df()
-        st.dataframe(df_produk, use_container_width=True)
+        # --- PERBAIKAN: Hanya mengambil kolom yang diperlukan saja ---
+        # Kita tidak memanggil 'terakhir_diupdate' agar kolomnya hilang dari tabel
+        df_produk = con.execute("SELECT id, nama_produk, harga, stok FROM produk ORDER BY id ASC").df()
         
-        # Membagi menjadi tiga kolom untuk aksi
+        # Tampilkan tabel dengan standar 2026 (width="stretch")
+        st.dataframe(df_produk, width="stretch", hide_index=True)
+        
         col_tambah, col_update, col_hapus = st.columns(3)
         
-        # 1. FITUR TAMBAH BARANG
         with col_tambah:
             with st.expander("➕ Tambah Barang Baru"):
                 with st.form("form_tambah_barang", clear_on_submit=True):
-                    nama_baru = st.text_input("Nama Produk Baru").strip() # .strip() untuk hapus spasi di awal/akhir
+                    nama_baru = st.text_input("Nama Produk Baru").strip()
                     harga_baru = st.number_input("Harga Jual (Rp)", min_value=0, step=500)
                     stok_awal = st.number_input("Stok Awal", min_value=0, step=1)
                     btn_tambah = st.form_submit_button("Simpan Barang")
                     
                     if btn_tambah and nama_baru:
-                        # 1. CEK APAKAH NAMA SUDAH ADA (Case-Insensitive)
-                        # Kita gunakan LOWER() agar 'Kopi' dan 'kopi' dianggap sama
+                        # Proteksi Duplikat (Huruf Besar/Kecil dianggap sama)
                         produk_eksis = con.execute(
                             "SELECT nama_produk FROM produk WHERE LOWER(nama_produk) = LOWER(?)", 
                             [nama_baru]
                         ).fetchone()
                         
                         if produk_eksis:
-                            st.error(f"❌ Gagal! Produk dengan nama '{nama_baru}' sudah ada di database.")
-                            st.info("Saran: Gunakan fitur 'Update Stok' jika hanya ingin menambah jumlah barang.")
+                            st.error(f"❌ Produk '{nama_baru}' sudah ada!")
                         else:
-                            # 2. Jika belum ada, baru cari ID terakhir dan masukkan
                             max_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM produk").fetchone()[0]
-                            
                             con.execute("""
                                 INSERT INTO produk (id, nama_produk, harga, stok) 
                                 VALUES (?, ?, ?, ?)
                             """, [int(max_id), str(nama_baru), float(harga_baru), int(stok_awal)])
-                            
-                            st.success(f"✅ Berhasil menambahkan {nama_baru}!")
+                            st.success(f"Berhasil menambah {nama_baru}!")
                             st.rerun()
 
-        # 2. FITUR UPDATE STOK
         with col_update:
             with st.expander("🔄 Update Stok"):
                 if not df_produk.empty:
                     with st.form("form_update_stok"):
-                        prod_edit = st.selectbox("Pilih Produk", df_produk['nama_produk'], key="sel_upd")
+                        # Gunakan label ID agar lebih spesifik jika ada nama yang mirip
+                        opsi_update = {f"{r['nama_produk']} (ID: {r['id']})": r['id'] for _, r in df_produk.iterrows()}
+                        pilihan_label = st.selectbox("Pilih Produk", options=list(opsi_update.keys()))
+                        id_target = opsi_update[pilihan_label]
+                        
                         stok_tambahan = st.number_input("Jumlah Perubahan Stok (+/-)", step=1)
                         btn_update = st.form_submit_button("Update Stok")
                         
                         if btn_update:
-                            con.execute("UPDATE produk SET stok = stok + ? WHERE nama_produk = ?", 
-                                        [int(stok_tambahan), str(prod_edit)])
-                            st.success(f"Stok {prod_edit} berhasil diperbarui!")
+                            con.execute("UPDATE produk SET stok = stok + ? WHERE id = ?", 
+                                        [int(stok_tambahan), id_target])
+                            st.success("Stok berhasil diperbarui!")
                             st.rerun()
-                else:
-                    st.info("Belum ada barang.")
 
-        # 3. FITUR HAPUS PRODUK (Fitur Baru)
         with col_hapus:
             with st.expander("🗑️ Hapus Produk"):
                 if not df_produk.empty:
                     with st.form("form_hapus_produk"):
-                        prod_hapus = st.selectbox("Pilih Produk yang akan Dihapus", df_produk['nama_produk'], key="sel_del")
-                        #st.warning("⚠️ Tindakan ini tidak dapat dibatalkan!")
-                        konfirmasi = st.checkbox("Saya yakin ingin menghapus produk ini")
+                        opsi_hapus = {f"{r['nama_produk']} (ID: {r['id']})": r['id'] for _, r in df_produk.iterrows()}
+                        label_hapus = st.selectbox("Pilih Produk", options=list(opsi_hapus.keys()))
+                        id_hapus = opsi_hapus[label_hapus]
+                        
+                        st.warning(f"Menghapus ID: {id_hapus}")
+                        konfirmasi = st.checkbox("Saya yakin ingin menghapus")
                         btn_hapus = st.form_submit_button("Hapus Permanen", type="primary")
                         
-                        if btn_hapus:
-                            if konfirmasi:
-                                con.execute("DELETE FROM produk WHERE nama_produk = ?", [str(prod_hapus)])
-                                st.success(f"Produk {prod_hapus} berhasil dihapus!")
-                                st.rerun()
-                            else:
-                                st.error("Silakan centang konfirmasi sebelum menghapus.")
-                else:
-                    st.info("Gudang kosong.")
+                        if btn_hapus and konfirmasi:
+                            con.execute("DELETE FROM produk WHERE id = ?", [id_hapus])
+                            st.success("Produk terhapus!")
+                            st.rerun()
 
     elif menu_admin == "Data Transaksi":
         st.subheader("📝 Histori Transaksi Lengkap")
