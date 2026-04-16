@@ -33,6 +33,7 @@ def login_ui():
             else:
                 st.error("Username atau Password salah!")
 
+
 # --- HALAMAN KASIR (INPUT TRANSAKSI) ---
 def cashier_ui():
     st.header(f"🛒 Kasir: {st.session_state.username}")
@@ -46,22 +47,23 @@ def cashier_ui():
 
     with col_input:
         st.subheader("Pilih Barang")
-        # Ambil list kategori unik untuk filter
+        # 1. Filter Kategori
         list_kategori = ["Semua"] + list(df_produk['kategori'].unique())
         filter_kat = st.selectbox("Filter Kategori", list_kategori)
 
+        # Logika filter data
         if filter_kat == "Semua":
             df_display = df_produk
         else:
             df_display = df_produk[df_produk['kategori'] == filter_kat]
 
-        # Gunakan df_display untuk selectbox produk
-        item_pilih = st.selectbox("Produk", df_display['nama_produk'])
-
+        # 2. SEKARANG HANYA ADA 1 FORM (CONTAINER)
+        # Baris "item_pilih" yang di luar form sudah dihapus
         with st.form("form_add_to_cart", clear_on_submit=True):
-            item_pilih = st.selectbox("Produk", df_produk['nama_produk'])
+            # Gunakan df_display agar pilihan produk terfilter berdasarkan kategori
+            item_pilih = st.selectbox("Produk", df_display['nama_produk']) 
             qty_pilih = st.number_input("Jumlah", min_value=1, step=1)
-            btn_add = st.form_submit_button("➕ Tambah")
+            btn_add = st.form_submit_button("➕ Tambah ke Keranjang")
 
             if btn_add:
                 row = df_produk[df_produk['nama_produk'] == item_pilih].iloc[0]
@@ -73,6 +75,7 @@ def cashier_ui():
                         "subtotal": float(row['harga'] * qty_pilih)
                     })
                     st.toast(f"{item_pilih} ditambah!")
+                    st.rerun() # Refresh agar keranjang langsung terupdate
                 else:
                     st.error("Stok habis!")
 
