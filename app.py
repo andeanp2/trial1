@@ -2,10 +2,10 @@ import streamlit as st
 import duckdb
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v4.0", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v4.2", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -22,7 +22,14 @@ def get_connection():
 
 con = get_connection()
 
-# --- 3. LOGIKA HELPER & RE-KALKULASI LABEL ---
+# --- 3. LOGIKA HELPER & WAKTU (WIB) ---
+
+# Definisi zona waktu WIB (UTC+7)
+WIB = timezone(timedelta(hours=7))
+
+def get_now_wib():
+    """Mengambil objek datetime sekarang dalam zona waktu WIB"""
+    return datetime.now(WIB)
 
 def standardize_options(opsi_string):
     if not opsi_string or str(opsi_string).strip().lower() == "none" or opsi_string == "":
@@ -66,7 +73,10 @@ def login_ui():
             else: st.error("Username atau Password salah!")
 
 def cashier_ui():
+    now_wib = get_now_wib()
     st.header(f"🛒 Kasir: {st.session_state.username}")
+    st.caption(f"Waktu Lokal (WIB): {now_wib.strftime('%d %B %Y | %H:%M:%S')}")
+    
     if "cart" not in st.session_state: st.session_state.cart = []
     if "last_tx" not in st.session_state: st.session_state.last_tx = None
 
@@ -82,19 +92,14 @@ def cashier_ui():
         st.subheader("Input Pesanan")
         list_kat = ["Semua"] + list(df_produk['kategori'].unique()) if not df_produk.empty else ["Semua"]
         f_kat = st.selectbox("Filter Kategori", list_kat)
-        
         df_filtered = df_produk if f_kat == "Semua" else df_produk[df_produk['kategori'] == f_kat]
 
         with st.form("form_cart", clear_on_submit=True):
             if not df_filtered.empty:
-                # --- PERUBAHAN DISINI: Hanya Nama Unik ---
                 nama_produk_unik = sorted(df_filtered['nama_produk'].unique())
                 item_p_name = st.selectbox("Pilih Produk", nama_produk_unik)
                 
-                # Ambil semua kemungkinan opsi untuk produk dengan nama tersebut
                 all_variations = df_produk[df_produk['nama_produk'] == item_p_name]
-                
-                # Gabungkan semua opsi unik dari berbagai ID produk dengan nama yang sama
                 available_labels = []
                 for opt_str in all_variations['opsi'].fillna("").tolist():
                     if opt_str:
@@ -104,32 +109,42 @@ def cashier_ui():
                 p_user_selection = st.multiselect("Opsi Tambahan:", available_labels)
                 qty_p = st.number_input("Jumlah", min_value=1, step=1)
 
-                if st.form_submit_button("➕ Tambah"):
-                    # Mencari ID produk yang cocok dengan Nama + Opsi yang dipilih
-                    selected_std_opt = standardize_options(", ".join(p_user_selection))
+                if st.form_submit_button("➕ Tambah Ke Keranjang"):
+                    # Validasi Konflik
+                    selected_lower = [s.lower() for s in p_user_selection]
+                    conflicts = [
+                        (["dingin", "hangat"], "Produk tidak bisa Dingin dan Hangat sekaligus!"),
+                        (["cup besar", "cup kecil"], "Pilih salah satu: Cup Besar atau Cup Kecil!"),
+                        (["besar", "kecil"], "Pilih salah satu: Ukuran Besar atau Kecil!")
+                    ]
                     
-                    target_product = None
-                    for _, row in all_variations.iterrows():
-                        if standardize_options(row['opsi']) == selected_std_opt:
-                            target_product = row
+                    has_conflict = False
+                    for pair, msg in conflicts:
+                        if all(x in selected_lower for x in pair):
+                            st.error(f"⚠️ {msg}")
+                            has_conflict = True
                             break
                     
-                    if target_product is not None:
-                        if int(target_product['stok']) >= qty_p:
-                            st.session_state.cart.append({
-                                "id": int(target_product['id']), 
-                                "nama": item_p_name, 
-                                "qty": int(qty_p),
-                                "harga": float(target_product['harga']), 
-                                "subtotal": float(target_product['harga'] * qty_p),
-                                "opsi": ", ".join(p_user_selection)
-                            })
-                            st.rerun()
-                        else: st.error(f"Stok tidak cukup! (Sisa: {target_product['stok']})")
-                    else:
-                        st.error("Kombinasi produk & opsi ini tidak tersedia di menu.")
-            else:
-                st.info("Produk tidak ditemukan di kategori ini.")
+                    if not has_conflict:
+                        selected_std_opt = standardize_options(", ".join(p_user_selection))
+                        target_product = None
+                        for _, row in all_variations.iterrows():
+                            if standardize_options(row['opsi']) == selected_std_opt:
+                                target_product = row
+                                break
+                        
+                        if target_product is not None:
+                            if int(target_product['stok']) >= qty_p:
+                                st.session_state.cart.append({
+                                    "id": int(target_product['id']), "nama": item_p_name, "qty": int(qty_p),
+                                    "harga": float(target_product['harga']), 
+                                    "subtotal": float(target_product['harga'] * qty_p),
+                                    "opsi": ", ".join(p_user_selection)
+                                })
+                                st.rerun()
+                            else: st.error(f"Stok Habis! Sisa: {target_product['stok']}")
+                        else:
+                            st.error("Kombinasi produk ini tidak terdaftar di menu Admin.")
 
     with col_cart:
         if st.session_state.last_tx and not st.session_state.cart:
@@ -151,29 +166,34 @@ def cashier_ui():
             df_disp['subtotal'] = df_disp['subtotal'].map("Rp{:,.0f}".format)
             st.table(df_disp[['nama', 'opsi', 'qty', 'subtotal']])
             st.write(f"### TOTAL: Rp{total:,.0f}")
-            
             if st.button("✅ SELESAIKAN", type="primary", use_container_width=True):
-                id_tx = datetime.now().strftime("%Y%m%d%H%M%S")
+                current_wib = get_now_wib()
+                id_tx = current_wib.strftime("%Y%m%d%H%M%S")
                 st.session_state.last_tx = {"id_tx": id_tx, "items": list(st.session_state.cart)}
                 for b in st.session_state.cart:
                     con.execute("UPDATE produk SET stok = stok - ? WHERE id = ?", [b['qty'], b['id']])
                     con.execute("INSERT INTO transaksi VALUES (?, ?, ?, ?, ?, ?, ?)", 
-                                [id_tx, b['nama'], int(b['qty']), float(b['subtotal']), st.session_state.username, datetime.now(), b['opsi']])
+                                [id_tx, b['nama'], int(b['qty']), float(b['subtotal']), st.session_state.username, current_wib, b['opsi']])
                 refresh_label_stocks()
                 st.session_state.cart = []
                 st.rerun()
 
 def admin_ui():
+    now_wib = get_now_wib()
     st.title("🏗️ Panel Admin")
+    st.caption(f"Server Time (WIB): {now_wib.strftime('%Y-%m-%d %H:%M:%S')}")
     menu = st.sidebar.selectbox("Menu", ["Dashboard", "Produk", "Label", "Transaksi"])
     
     if menu == "Dashboard":
-        res_h = con.execute("SELECT SUM(total_harga) FROM transaksi WHERE CAST(waktu AS DATE) = CURRENT_DATE").fetchone()
+        # Filter Omset menggunakan tanggal WIB hari ini
+        today_str = now_wib.strftime('%Y-%m-%d')
+        res_h = con.execute("SELECT SUM(total_harga) FROM transaksi WHERE CAST(waktu AS DATE) = ?", [today_str]).fetchone()
         h = res_h[0] if res_h and res_h[0] is not None else 0
-        st.metric("Omset Hari Ini", f"Rp{h:,.0f}")
+        st.metric("Omset Hari Ini (WIB)", f"Rp{h:,.0f}")
+        
         df_tx = con.execute("SELECT * FROM transaksi").df()
         if not df_tx.empty:
-            st.plotly_chart(px.bar(df_tx, x='waktu', y='total_harga', color='nama_produk'), use_container_width=True)
+            st.plotly_chart(px.bar(df_tx, x='waktu', y='total_harga', color='nama_produk', title="Grafik Penjualan"), use_container_width=True)
 
     elif menu == "Produk":
         st.subheader("📦 Daftar Produk")
@@ -185,7 +205,6 @@ def admin_ui():
         if search: query += f" WHERE LOWER(nama_produk) LIKE LOWER('%{search}%')"
         query += " ORDER BY id DESC"
         df_p = con.execute(query).df()
-        
         df_p_disp = df_p.copy()
         df_p_disp['harga'] = df_p_disp['harga'].map("Rp{:,.0f}".format)
         st.dataframe(df_p_disp.head(limit), use_container_width=True, hide_index=True)
@@ -203,8 +222,8 @@ def admin_ui():
                 with c2:
                     h = st.number_input("Harga", min_value=0, step=500)
                     s = st.number_input("Stok Awal", min_value=0, step=1)
-                o = st.text_input("Opsi/Label (Pisahkan dengan koma)")
-                if st.form_submit_button("Simpan Produk"):
+                o = st.text_input("Opsi (Pisah koma)")
+                if st.form_submit_button("Simpan"):
                     if n:
                         std_o = standardize_options(o)
                         exist = con.execute("SELECT opsi FROM produk WHERE LOWER(nama_produk) = LOWER(?)", [n]).fetchall()
@@ -258,10 +277,12 @@ def admin_ui():
         st.dataframe(df_l, use_container_width=True, hide_index=True)
 
     elif menu == "Transaksi":
-        st.subheader("📜 Riwayat Transaksi")
+        st.subheader("📜 Riwayat Transaksi (Format WIB)")
         df_tx = con.execute("SELECT * FROM transaksi ORDER BY waktu DESC").df()
         if not df_tx.empty:
             df_tx_disp = df_tx.copy()
+            # Format waktu agar mudah dibaca di tabel
+            df_tx_disp['waktu'] = pd.to_datetime(df_tx_disp['waktu']).dt.strftime('%d/%m/%Y %H:%M')
             df_tx_disp['total_harga'] = df_tx_disp['total_harga'].map("Rp{:,.0f}".format)
             st.dataframe(df_tx_disp, use_container_width=True, hide_index=True)
         else: st.info("Belum ada transaksi.")
