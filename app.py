@@ -211,7 +211,7 @@ def admin_ui():
         st.dataframe(df_l, use_container_width=True, hide_index=True)
 
     elif menu == "Transaksi":
-        st.subheader("📜 Riwayat Transaksi (WIB)")
+        st.subheader("📜 Riwayat Transaksi")
         df_tx = con.execute("SELECT * FROM transaksi ORDER BY waktu DESC").df()
         if not df_tx.empty:
             df_tx_disp = df_tx.copy()
