@@ -5,15 +5,31 @@ import plotly.express as px
 from datetime import datetime
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v2.3", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v2.5", layout="wide")
 
 # --- KONEKSI DATABASE ---
 @st.cache_resource
 def get_connection():
     TOKEN = st.secrets["MOTHERDUCK_TOKEN"]
-    return duckdb.connect(f"md:tes_db?motherduck_token={TOKEN}")
+    return duckdb.connect(f"md:my_db?motherduck_token={TOKEN}")
 
 con = get_connection()
+
+# --- FUNGSI PEMBANTU: AUTO-SYNC LABEL ---
+def sync_labels(opsi_string):
+    """Fungsi untuk memastikan semua opsi produk terdaftar di tabel label_stok"""
+    if opsi_string and str(opsi_string) != "None":
+        list_opsi = [item.strip() for item in opsi_string.split(",")]
+        for item in list_opsi:
+            if item == "": continue
+            # Cek apakah label sudah ada (Case-Insensitive)
+            exist = con.execute("SELECT id_label FROM label_stok WHERE LOWER(nama_label) = LOWER(?)", [item]).fetchone()
+            
+            if not exist:
+                # Jika belum ada, tambahkan otomatis dengan stok awal 0
+                new_lid = con.execute("SELECT COALESCE(MAX(id_label), 0) + 1 FROM label_stok").fetchone()[0]
+                con.execute("INSERT INTO label_stok (id_label, nama_label, stok, satuan) VALUES (?, ?, ?, ?)", 
+                            [int(new_lid), item, 0, 'pcs'])
 
 # --- FUNGSI LOGIN ---
 def login_ui():
@@ -62,17 +78,13 @@ def cashier_ui():
                     if int(row_info['stok']) >= qty_pilih:
                         st.session_state.cart.append({
                             "id_produk": int(row_info['id']),
-                            "nama": item_pilih, 
-                            "qty": int(qty_pilih),
-                            "harga": float(row_info['harga']), 
-                            "subtotal": float(row_info['harga'] * qty_pilih),
+                            "nama": item_pilih, "qty": int(qty_pilih),
+                            "harga": float(row_info['harga']), "subtotal": float(row_info['harga'] * qty_pilih),
                             "opsi": pilihan_opsi_str
                         })
                         st.rerun()
                     else:
                         st.error("Stok Produk Habis!")
-            else:
-                st.warning("Produk tidak tersedia.")
 
     with col_cart:
         st.subheader("Isi Keranjang")
@@ -81,8 +93,7 @@ def cashier_ui():
             for i, b in enumerate(st.session_state.cart):
                 c1, c2, c3 = st.columns([3, 2, 1])
                 info_barang = f"**{b['nama']}**"
-                if b['opsi']: 
-                    info_barang += f"  \n*({b['opsi']})*"
+                if b['opsi']: info_barang += f"  \n*({b['opsi']})*"
                 c1.write(f"{info_barang}  \n{b['qty']} x Rp{b['harga']:,.0f}")
                 c2.write(f"Rp{b['subtotal']:,.0f}")
                 if c3.button("🗑️", key=f"del_{i}"):
@@ -95,11 +106,15 @@ def cashier_ui():
                 id_tx = datetime.now().strftime("%Y%m%d%H%M%S")
                 waktu_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 for b in st.session_state.cart:
+                    # Kurangi stok produk
                     con.execute("UPDATE produk SET stok = stok - ? WHERE id = ?", [b['qty'], b['id_produk']])
+                    
+                    # Kurangi stok label berdasarkan pilihan opsi
                     if b['opsi']:
-                        list_pilihan = [p.strip() for p in b['opsi'].split(",")]
-                        for p in list_pilihan:
+                        list_p = [p.strip() for p in b['opsi'].split(",")]
+                        for p in list_p:
                             con.execute("UPDATE label_stok SET stok = stok - ? WHERE nama_label = ?", [b['qty'], p])
+                            
                     con.execute("INSERT INTO transaksi VALUES (?, ?, ?, ?, ?, ?, ?)", 
                                 [id_tx, b['nama'], b['qty'], b['subtotal'], st.session_state.username, waktu_str, b['opsi']])
                 st.success("Transaksi Berhasil!")
@@ -141,12 +156,15 @@ def admin_ui():
                     if st.form_submit_button("Simpan"):
                         check = con.execute("SELECT nama_produk FROM produk WHERE LOWER(nama_produk) = LOWER(?)", [n]).fetchone()
                         if check:
-                            st.error(f"❌ Produk '{n}' sudah terdaftar!")
+                            st.error(f"❌ Produk '{n}' sudah ada!")
                         elif n == "":
                             st.warning("Nama tidak boleh kosong")
                         else:
                             nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
                             con.execute("INSERT INTO produk VALUES (?,?,?,?,?,?)", [nid, n, k, h, s, o])
+                            # SINKRONISASI OTOMATIS KE TABEL LABEL
+                            sync_labels(o)
+                            st.success(f"Berhasil menambah {n} dan sinkronisasi label.")
                             st.rerun()
                             
         with col2:
@@ -160,6 +178,8 @@ def admin_ui():
                         no = st.text_input("Update Opsi", value=str(r['opsi']))
                         if st.form_submit_button("Update"):
                             con.execute("UPDATE produk SET harga=?, stok=stok+?, opsi=? WHERE id=?", [nh, ns, no, int(r['id'])])
+                            # SINKRONISASI OTOMATIS JIKA ADA OPSI BARU
+                            sync_labels(no)
                             st.rerun()
                             
         with col3:
@@ -186,8 +206,6 @@ def admin_ui():
                         check_l = con.execute("SELECT nama_label FROM label_stok WHERE LOWER(nama_label) = LOWER(?)", [nl]).fetchone()
                         if check_l:
                             st.error(f"❌ Label '{nl}' sudah ada!")
-                        elif nl == "":
-                            st.warning("Nama tidak boleh kosong")
                         else:
                             lid = con.execute("SELECT COALESCE(MAX(id_label),0)+1 FROM label_stok").fetchone()[0]
                             con.execute("INSERT INTO label_stok VALUES (?,?,?,?)", [lid, nl, sl, sat])
