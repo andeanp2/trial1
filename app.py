@@ -10,7 +10,6 @@ st.set_page_config(page_title="Sistem Kasir Pro v1", layout="wide")
 # --- KONEKSI DATABASE ---
 @st.cache_resource
 def get_connection():
-    # Pastikan token sudah ada di secrets
     TOKEN = st.secrets["MOTHERDUCK_TOKEN"]
     return duckdb.connect(f"md:my_db?motherduck_token={TOKEN}")
 
@@ -34,7 +33,7 @@ def login_ui():
             else:
                 st.error("Username atau Password salah!")
 
-# --- HALAMAN KASIR (INPUT TRANSAKSI) ---
+# --- HALAMAN KASIR ---
 def cashier_ui():
     st.header(f"🛒 Kasir: {st.session_state.username}")
     
@@ -42,7 +41,6 @@ def cashier_ui():
         st.session_state.cart = []
 
     df_produk = con.execute("SELECT * FROM produk").df()
-
     col_input, col_cart = st.columns([1, 2])
 
     with col_input:
@@ -50,10 +48,7 @@ def cashier_ui():
         list_kategori = ["Semua"] + list(df_produk['kategori'].unique())
         filter_kat = st.selectbox("Filter Kategori", list_kategori)
 
-        if filter_kat == "Semua":
-            df_display = df_produk
-        else:
-            df_display = df_produk[df_produk['kategori'] == filter_kat]
+        df_display = df_produk if filter_kat == "Semua" else df_produk[df_produk['kategori'] == filter_kat]
 
         with st.form("form_add_to_cart", clear_on_submit=True):
             item_pilih = st.selectbox("Produk", df_display['nama_produk']) 
@@ -72,7 +67,7 @@ def cashier_ui():
                     st.toast(f"{item_pilih} ditambah!")
                     st.rerun()
                 else:
-                    st.error("Stok tidak mencukupi!")
+                    st.error("Stok habis!")
 
     with col_cart:
         st.subheader("Isi Keranjang")
@@ -96,7 +91,7 @@ def cashier_ui():
                 st.rerun()
 
             if c2.button("✅ PROSES TRANSAKSI"):
-                id_tx = str(datetime.now().strftime("%Y%m%d%H%M%S"))
+                id_tx = datetime.now().strftime("%Y%m%d%H%M%S")
                 waktu_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 for b in st.session_state.cart:
                     con.execute("UPDATE produk SET stok = stok - ? WHERE nama_produk = ?", [b['qty'], b['nama']])
@@ -111,82 +106,40 @@ def cashier_ui():
         else:
             st.info("Keranjang kosong.")
 
-    # --- RIWAYAT HARIAN KASIR ---
-    st.divider()
-    col_head, col_opt = st.columns([2, 2])
-    with col_head:
-        st.subheader("📜 Riwayat Struk Hari Ini")
-    
-    with col_opt:
-        opsi_limit = [5, 10, 20, 50, "Semua"]
-        pilihan_limit = st.selectbox("Tampilkan maksimal:", opsi_limit, index=1)
-
-    limit_sql = "" if pilihan_limit == "Semua" else f"LIMIT {pilihan_limit}"
-    
-    query_tabel = f"""
-        SELECT 
-            id_transaksi AS "ID Struk", 
-            MAX(waktu) AS "Jam", 
-            SUM(total_harga) AS "Total Belanja",
-            COUNT(nama_produk) AS "Jenis Barang"
-        FROM transaksi 
-        WHERE kasir = ? AND CAST(waktu AS DATE) = CURRENT_DATE
-        GROUP BY id_transaksi
-        ORDER BY "Jam" DESC
-        {limit_sql}
-    """
-    
-    df_struk = con.execute(query_tabel, [str(st.session_state.username)]).df()
-
-    if not df_struk.empty:
-        total_omzet = con.execute(
-            "SELECT SUM(total_harga) FROM transaksi WHERE kasir = ? AND CAST(waktu AS DATE) = CURRENT_DATE",
-            [str(st.session_state.username)]
-        ).fetchone()[0] or 0
-        
-        st.metric("Total Omzet Anda Hari Ini", f"Rp{total_omzet:,.0f}")
-        
-        st.dataframe(
-            df_struk.style.format({"Total Belanja": "Rp{:,.0f}", "Jam": lambda t: t.strftime('%H:%M:%S')}),
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        with st.expander("🔍 Cek Detail Barang per Struk"):
-            struk_pilihan = st.selectbox("Pilih ID Struk:", df_struk["ID Struk"])
-            if struk_pilihan:
-                df_det = con.execute(
-                    "SELECT nama_produk AS Produk, jumlah AS Qty, total_harga AS Subtotal FROM transaksi WHERE id_transaksi = ?", 
-                    [struk_pilihan]
-                ).df()
-                st.table(df_det)
-    else:
-        st.info("Belum ada transaksi hari ini.")
-
 # --- HALAMAN ADMIN ---
 def admin_ui():
     st.title("🏗️ Panel Admin")
     menu_admin = st.sidebar.selectbox("Menu Admin", ["Dashboard Utama", "Manajemen Stok", "Data Transaksi"])
     
     if menu_admin == "Dashboard Utama":
-        st.subheader("📊 Ringkasan Bisnis")
+        st.subheader("📊 Performa Penjualan")
         col1, col2 = st.columns(2)
         
-        total_penjualan = con.execute("SELECT SUM(total_harga) FROM transaksi").fetchone()[0] or 0
-        total_stok = con.execute("SELECT SUM(stok) FROM produk").fetchone()[0] or 0
+        # 1. Omset Hari Ini
+        omset_hari_ini = con.execute("""
+            SELECT SUM(total_harga) 
+            FROM transaksi 
+            WHERE CAST(waktu AS DATE) = CURRENT_DATE
+        """).fetchone()[0] or 0
+
+        # 2. Omset Bulan Ini (Filter berdasarkan bulan dan tahun sekarang)
+        omset_bulan_ini = con.execute("""
+            SELECT SUM(total_harga) 
+            FROM transaksi 
+            WHERE date_trunc('month', CAST(waktu AS TIMESTAMP)) = date_trunc('month', CURRENT_DATE)
+        """).fetchone()[0] or 0
         
-        col1.metric("Total Pendapatan", f"Rp{total_penjualan:,.0f}")
-        col2.metric("Total Stok Barang", f"{total_stok} unit")
+        col1.metric("Omset Hari Ini", f"Rp{omset_hari_ini:,.0f}")
+        col2.metric("Omset Bulan Ini", f"Rp{omset_bulan_ini:,.0f}")
         
+        # Grafik Penjualan
         df_tx = con.execute("SELECT * FROM transaksi").df()
         if not df_tx.empty:
-            fig = px.bar(df_tx, x='waktu', y='total_harga', title="Tren Penjualan", color='nama_produk')
+            fig = px.bar(df_tx, x='waktu', y='total_harga', title="Tren Penjualan Barang", color='nama_produk')
             st.plotly_chart(fig, use_container_width=True)
 
     elif menu_admin == "Manajemen Stok":
         st.subheader("📦 Manajemen Gudang & Stok")
-        
-        # Ambil data produk terbaru
         df_produk = con.execute("SELECT id, nama_produk, kategori, harga, stok FROM produk ORDER BY id ASC").df()
         st.dataframe(df_produk, use_container_width=True, hide_index=True)
         
@@ -219,8 +172,6 @@ def admin_ui():
                         opsi_edit = {f"{r['nama_produk']} (ID: {r['id']})": r['id'] for _, r in df_produk.iterrows()}
                         pilihan_label = st.selectbox("Pilih Produk", options=list(opsi_edit.keys()))
                         id_target = opsi_edit[pilihan_label]
-                        
-                        # Ambil info saat ini
                         data_skrg = df_produk[df_produk['id'] == id_target].iloc[0]
                         
                         st.write(f"Harga saat ini: **Rp{data_skrg['harga']:,.0f}**")
@@ -228,14 +179,10 @@ def admin_ui():
                         stok_tambahan = st.number_input("Tambah/Kurang Stok (+/-)", step=1, value=0)
                         
                         btn_update = st.form_submit_button("Simpan Perubahan")
-                        
                         if btn_update:
-                            con.execute("""
-                                UPDATE produk 
-                                SET harga = ?, stok = stok + ? 
-                                WHERE id = ?
-                            """, [float(harga_update), int(stok_tambahan), id_target])
-                            st.success("Update Harga & Stok Berhasil!")
+                            con.execute("UPDATE produk SET harga = ?, stok = stok + ? WHERE id = ?", 
+                                        [float(harga_update), int(stok_tambahan), id_target])
+                            st.success("Update Berhasil!")
                             st.rerun()
 
         with col_hapus:
@@ -245,7 +192,6 @@ def admin_ui():
                         opsi_hapus = {f"{r['nama_produk']} (ID: {r['id']})": r['id'] for _, r in df_produk.iterrows()}
                         label_hapus = st.selectbox("Pilih Produk", options=list(opsi_hapus.keys()))
                         id_hapus = opsi_hapus[label_hapus]
-                        
                         st.warning(f"Menghapus ID: {id_hapus}")
                         konfirmasi = st.checkbox("Saya yakin ingin menghapus")
                         btn_hapus = st.form_submit_button("Hapus Permanen", type="primary")
@@ -264,7 +210,7 @@ def admin_ui():
 if "logged_in" not in st.session_state:
     login_ui()
 else:
-    st.sidebar.write(f"User: **{st.session_state.username}** | Role: **{st.session_state.role}**")
+    st.sidebar.write(f"User: **{st.session_state.username}** ({st.session_state.role})")
     if st.sidebar.button("Logout"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
