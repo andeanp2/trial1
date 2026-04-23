@@ -11,7 +11,7 @@ st.set_page_config(page_title="Sistem Kasir Pro v2.5", layout="wide")
 @st.cache_resource
 def get_connection():
     TOKEN = st.secrets["MOTHERDUCK_TOKEN"]
-    return duckdb.connect(f"md:my_db?motherduck_token={TOKEN}")
+    return duckdb.connect(f"md:tes_db?motherduck_token={TOKEN}")
 
 con = get_connection()
 
