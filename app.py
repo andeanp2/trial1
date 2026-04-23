@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v2.9", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v3.0", layout="wide")
 
 # --- KONEKSI DATABASE ---
 @st.cache_resource
@@ -17,28 +17,16 @@ con = get_connection()
 
 # --- LOGIKA SINKRONISASI KUMULATIF ---
 def sync_cumulative_label(opsi_string, delta_stok):
-    """
-    Menyelaraskan stok label secara akumulatif.
-    Setiap kata dalam opsi produk akan menjadi baris di tabel label_stok.
-    """
     if opsi_string and str(opsi_string) != "None" and delta_stok != 0:
         list_opsi = [item.strip() for item in opsi_string.split(",")]
-        
         for item in list_opsi:
             if item == "": continue
-            
-            # Cek apakah label sudah ada (Case-Insensitive)
             exist = con.execute("SELECT id_label FROM label_stok WHERE LOWER(nama_label) = LOWER(?)", [item]).fetchone()
-            
             if exist:
-                # Tambahkan selisih stok ke label yang sudah ada
-                con.execute("UPDATE label_stok SET stok = stok + ? WHERE LOWER(nama_label) = LOWER(?)", 
-                            [int(delta_stok), item.lower()])
+                con.execute("UPDATE label_stok SET stok = stok + ? WHERE LOWER(nama_label) = LOWER(?)", [int(delta_stok), item.lower()])
             else:
-                # Jika belum ada, buat label baru dengan stok awal sesuai delta_stok
                 new_lid = con.execute("SELECT COALESCE(MAX(id_label), 0) + 1 FROM label_stok").fetchone()[0]
-                con.execute("INSERT INTO label_stok (id_label, nama_label, stok, satuan) VALUES (?, ?, ?, ?)", 
-                            [int(new_lid), item, int(delta_stok), 'pcs'])
+                con.execute("INSERT INTO label_stok (id_label, nama_label, stok, satuan) VALUES (?, ?, ?, ?)", [int(new_lid), item, int(delta_stok), 'pcs'])
 
 # --- FUNGSI LOGIN ---
 def login_ui():
@@ -59,7 +47,10 @@ def login_ui():
 # --- HALAMAN KASIR ---
 def cashier_ui():
     st.header(f"🛒 Kasir: {st.session_state.username}")
+    
+    # Inisialisasi Session State
     if "cart" not in st.session_state: st.session_state.cart = []
+    if "last_tx" not in st.session_state: st.session_state.last_tx = None
 
     df_produk = con.execute("SELECT * FROM produk").df()
     col_input, col_cart = st.columns([1, 2])
@@ -79,10 +70,13 @@ def cashier_ui():
                 p_opsi = ""
                 if row['opsi'] and str(row['opsi']) != "None":
                     opts = [o.strip() for o in str(row['opsi']).split(",")]
-                    p_user = st.multiselect("Opsi/Label Tambahan:", opts)
+                    p_user = st.multiselect("Opsi Tambahan:", opts)
                     p_opsi = ", ".join(p_user)
 
                 if st.form_submit_button("➕ Tambah ke Keranjang"):
+                    # RESET tampilan transaksi terakhir jika mulai input baru
+                    st.session_state.last_tx = None 
+                    
                     if int(row['stok']) >= qty_p:
                         st.session_state.cart.append({
                             "id": int(row['id']), "nama": item_p, "qty": int(qty_p),
@@ -94,9 +88,28 @@ def cashier_ui():
                         st.error("Stok Produk Tidak Mencukupi!")
 
     with col_cart:
-        st.subheader("Keranjang")
-        if st.session_state.cart:
+        # KONDISI 1: JIKA TRANSAKSI BARU SAJA SUKSES (Tampilkan Detail Terakhir)
+        if st.session_state.last_tx and not st.session_state.cart:
+            st.success(f"✅ Transaksi Berhasil! (ID: {st.session_state.last_tx['id_tx']})")
+            st.subheader("📄 Detail Transaksi Terakhir")
+            
+            for item in st.session_state.last_tx['items']:
+                c1, c2 = st.columns([3, 1])
+                c1.write(f"**{item['nama']}** x{item['qty']} \n*({item['opsi']})*")
+                c2.write(f"Rp{item['subtotal']:,.0f}")
+            
+            st.divider()
+            st.write(f"### TOTAL BAYAR: Rp{st.session_state.last_tx['total']:,.0f}")
+            
+            if st.button("🆕 Mulai Transaksi Baru", type="primary"):
+                st.session_state.last_tx = None
+                st.rerun()
+
+        # KONDISI 2: JIKA KERANJANG SEDANG TERISI
+        elif st.session_state.cart:
+            st.subheader("🛒 Keranjang Belanja")
             total_bayar = sum(i['subtotal'] for i in st.session_state.cart)
+            
             for i, b in enumerate(st.session_state.cart):
                 c1, c2, c3 = st.columns([3, 2, 1])
                 label_txt = f"**{b['nama']}**"
@@ -109,24 +122,35 @@ def cashier_ui():
             
             st.divider()
             st.write(f"### TOTAL: Rp{total_bayar:,.0f}")
-            if st.button("✅ PROSES TRANSAKSI", use_container_width=True):
+            
+            col_btn1, col_btn2 = st.columns(2)
+            if col_btn1.button("🧹 Kosongkan", use_container_width=True):
+                st.session_state.cart = []
+                st.rerun()
+                
+            if col_btn2.button("✅ PROSES SEKARANG", type="primary", use_container_width=True):
                 id_tx = datetime.now().strftime("%Y%m%d%H%M%S")
                 waktu = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Simpan Snapshot untuk Detail Terakhir sebelum dikosongkan
+                st.session_state.last_tx = {
+                    "id_tx": id_tx,
+                    "items": list(st.session_state.cart),
+                    "total": total_bayar
+                }
+                
                 for b in st.session_state.cart:
-                    # 1. Potong Stok Produk & Label (Sinkron)
                     con.execute("UPDATE produk SET stok = stok - ? WHERE id = ?", [b['qty'], b['id']])
                     if b['opsi']:
                         sync_cumulative_label(b['opsi'], -b['qty'])
-                    
-                    # 2. Simpan Transaksi
                     con.execute("INSERT INTO transaksi VALUES (?, ?, ?, ?, ?, ?, ?)", 
                                 [id_tx, b['nama'], b['qty'], b['subtotal'], st.session_state.username, waktu, b['opsi']])
                 
-                st.success("Transaksi Berhasil!")
                 st.session_state.cart = []
                 st.rerun()
+        
         else:
-            st.info("Keranjang masih kosong.")
+            st.info("Keranjang kosong. Silakan pilih produk di sebelah kiri.")
 
 # --- HALAMAN ADMIN ---
 def admin_ui():
@@ -163,7 +187,6 @@ def admin_ui():
                         if not check:
                             nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
                             con.execute("INSERT INTO produk VALUES (?,?,?,?,?,?)", [nid, n, k, h, s, o])
-                            # SINKRONISASI: Label ikut bertambah
                             sync_cumulative_label(o, s)
                             st.rerun()
                         else: st.error("Nama produk sudah terdaftar!")
@@ -179,7 +202,6 @@ def admin_ui():
                         no = st.text_input("Update Opsi/Label", value=str(r['opsi']))
                         if st.form_submit_button("Update"):
                             con.execute("UPDATE produk SET harga=?, stok=stok+?, opsi=? WHERE id=?", [nh, ns, no, int(r['id'])])
-                            # SINKRONISASI: Akumulasi label sesuai ns
                             sync_cumulative_label(no, ns)
                             st.rerun()
 
@@ -193,7 +215,6 @@ def admin_ui():
 
     elif menu == "Manajemen Label":
         st.subheader("🧪 Inventori Label & Bahan Baku")
-        st.info("Label akan otomatis terakumulasi dari semua produk yang memiliki label sama.")
         df_l = con.execute("SELECT * FROM label_stok ORDER BY id_label ASC").df()
         st.dataframe(df_l, use_container_width=True, hide_index=True)
         
@@ -242,7 +263,7 @@ def admin_ui():
 if "logged_in" not in st.session_state:
     login_ui()
 else:
-    st.sidebar.write(f"Login sebagai: **{st.session_state.username}**")
+    st.sidebar.write(f"Login: **{st.session_state.username}**")
     if st.sidebar.button("Logout"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
