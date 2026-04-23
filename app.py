@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v3.5", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v3.6", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -152,13 +152,15 @@ def admin_ui():
         # Tampilkan tabel utama
         st.dataframe(df_p.head(limit), use_container_width=True, hide_index=True)
         if len(df_p) > limit:
-            st.info(f"Menampilkan {limit} dari {len(df_p)} produk. Gunakan fitur cari.")
+            st.info(f"Menampilkan {limit} dari {len(df_p)} produk.")
 
         st.markdown("---")
         st.subheader("🛠️ Kelola Data Produk")
         
-        # CRUD Form di bawah tabel
-        tab_add, tab_edit, tab_del = st.tabs(["➕ Tambah Baru", "✏️ Edit Produk", "🗑️ Hapus Produk"])
+        # CRUD Form dengan menu Update Stok baru
+        tab_add, tab_edit, tab_stock, tab_del = st.tabs([
+            "➕ Tambah Baru", "✏️ Edit Detail", "📦 Update Stok", "🗑️ Hapus"
+        ])
 
         with tab_add:
             with st.form("form_add", clear_on_submit=True):
@@ -169,14 +171,12 @@ def admin_ui():
                 with c2:
                     h = st.number_input("Harga", min_value=0, step=500)
                     s = st.number_input("Stok Awal", min_value=0, step=1)
-                o = st.text_input("Opsi/Label (Contoh: Gula, Es Batu)")
-                
+                o = st.text_input("Opsi/Label (Pisahkan dengan koma)")
                 if st.form_submit_button("Simpan Produk"):
                     if n:
-                        # LOGIKA CEK DUPLIKAT (Case Insensitive)
                         check = con.execute("SELECT nama_produk FROM produk WHERE LOWER(nama_produk) = LOWER(?)", [n]).fetchone()
                         if check:
-                            st.error(f"❌ Gagal! Produk '{n}' sudah ada di database (Duplikat).")
+                            st.error(f"❌ Gagal! Produk '{n}' sudah ada (Duplikat).")
                         else:
                             nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
                             con.execute("INSERT INTO produk VALUES (?,?,?,?,?,?)", [nid, n, k, h, s, o])
@@ -190,30 +190,34 @@ def admin_ui():
                 sel_edit = st.selectbox("Pilih Produk Edit", df_p['nama_produk'].sort_values())
                 row = df_p[df_p['nama_produk'] == sel_edit].iloc[0]
                 with st.form("form_edit"):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        en = st.text_input("Nama Produk", value=row['nama_produk'])
-                        eh = st.number_input("Harga", value=float(row['harga']))
-                    with c2:
-                        es = st.number_input("Stok", value=int(row['stok']))
-                        eo = st.text_input("Opsi", value=str(row['opsi']) if row['opsi'] else "")
-                    
-                    if st.form_submit_button("Update Data"):
-                        # Cek jika nama diubah ke nama yang sudah ada di produk LAIN
-                        if en.lower() != row['nama_produk'].lower():
-                            check_edit = con.execute("SELECT id FROM produk WHERE LOWER(nama_produk) = LOWER(?) AND id != ?", [en, int(row['id'])]).fetchone()
-                        else:
-                            check_edit = None
+                    en = st.text_input("Nama Produk", value=row['nama_produk'])
+                    eh = st.number_input("Harga", value=float(row['harga']))
+                    eo = st.text_input("Opsi", value=str(row['opsi']) if row['opsi'] else "")
+                    if st.form_submit_button("Update Info Produk"):
+                        con.execute("UPDATE produk SET nama_produk=?, harga=?, opsi=? WHERE id=?", 
+                                    [en, eh, eo, int(row['id'])])
+                        st.success(f"✅ Detail '{en}' diperbarui (Stok tetap)")
+                        st.rerun()
 
-                        if check_edit:
-                            st.error(f"❌ Nama '{en}' sudah digunakan oleh produk lain!")
-                        else:
-                            delta = es - int(row['stok'])
-                            con.execute("UPDATE produk SET nama_produk=?, harga=?, stok=?, opsi=? WHERE id=?", 
-                                        [en, eh, es, eo, int(row['id'])])
-                            if eo: sync_cumulative_label(eo, delta)
-                            st.success(f"✅ Berhasil memperbarui: {en}")
-                            st.rerun()
+        with tab_stock:
+            if not df_p.empty:
+                sel_stock = st.selectbox("Pilih Produk untuk Update Stok", df_p['nama_produk'].sort_values(), key="stk_sel")
+                row_s = df_p[df_p['nama_produk'] == sel_stock].iloc[0]
+                st.write(f"Stok saat ini: **{row_s['stok']}**")
+                
+                with st.form("form_update_stok"):
+                    # min_value diset None agar bisa minus tak terhingga
+                    change = st.number_input("Jumlah Perubahan (+ untuk tambah, - untuk kurang)", value=0, step=1)
+                    st.caption("Gunakan angka negatif (misal: -5) untuk mengurangi stok secara manual.")
+                    
+                    if st.form_submit_button("Konfirmasi Perubahan Stok"):
+                        con.execute("UPDATE produk SET stok = stok + ? WHERE id = ?", [int(change), int(row_s['id'])])
+                        # Sinkronisasi label berdasarkan perubahan manual
+                        if row_s['opsi']:
+                            sync_cumulative_label(row_s['opsi'], change)
+                        
+                        st.success(f"✅ Stok '{sel_stock}' berhasil diupdate! (Perubahan: {change})")
+                        st.rerun()
 
         with tab_del:
             if not df_p.empty:
