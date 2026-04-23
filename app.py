@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v3.9", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v4.0", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -32,7 +32,6 @@ def standardize_options(opsi_string):
     return ", ".join(parts)
 
 def refresh_label_stocks():
-    """Menghitung ulang akumulasi stok label dari tabel produk"""
     try:
         df_all = con.execute("SELECT opsi, stok FROM produk WHERE opsi IS NOT NULL AND opsi != ''").df()
         if df_all.empty:
@@ -83,36 +82,59 @@ def cashier_ui():
         st.subheader("Input Pesanan")
         list_kat = ["Semua"] + list(df_produk['kategori'].unique()) if not df_produk.empty else ["Semua"]
         f_kat = st.selectbox("Filter Kategori", list_kat)
-        df_display = df_produk if f_kat == "Semua" else df_produk[df_produk['kategori'] == f_kat]
+        
+        df_filtered = df_produk if f_kat == "Semua" else df_produk[df_produk['kategori'] == f_kat]
 
         with st.form("form_cart", clear_on_submit=True):
-            if not df_display.empty:
-                item_p = st.selectbox("Pilih Produk", df_display['nama_produk']) 
-                qty_p = st.number_input("Jumlah", min_value=1, step=1)
-                row = df_produk[df_produk['nama_produk'] == item_p].iloc[0]
+            if not df_filtered.empty:
+                # --- PERUBAHAN DISINI: Hanya Nama Unik ---
+                nama_produk_unik = sorted(df_filtered['nama_produk'].unique())
+                item_p_name = st.selectbox("Pilih Produk", nama_produk_unik)
                 
-                p_opsi = ""
-                if row['opsi'] and str(row['opsi']) != "None":
-                    opts = [o.strip() for o in str(row['opsi']).split(",")]
-                    p_user = st.multiselect("Opsi Tambahan:", opts)
-                    p_opsi = ", ".join(p_user)
+                # Ambil semua kemungkinan opsi untuk produk dengan nama tersebut
+                all_variations = df_produk[df_produk['nama_produk'] == item_p_name]
+                
+                # Gabungkan semua opsi unik dari berbagai ID produk dengan nama yang sama
+                available_labels = []
+                for opt_str in all_variations['opsi'].fillna("").tolist():
+                    if opt_str:
+                        available_labels.extend([x.strip() for x in opt_str.split(",")])
+                available_labels = sorted(list(set(available_labels)))
+                
+                p_user_selection = st.multiselect("Opsi Tambahan:", available_labels)
+                qty_p = st.number_input("Jumlah", min_value=1, step=1)
 
                 if st.form_submit_button("➕ Tambah"):
-                    if int(row['stok']) >= qty_p:
-                        st.session_state.cart.append({
-                            "id": int(row['id']), "nama": item_p, "qty": int(qty_p),
-                            "harga": float(row['harga']), 
-                            "subtotal": float(row['harga'] * qty_p), # Simpan sebagai float murni untuk DB
-                            "opsi": p_opsi
-                        })
-                        st.rerun()
-                    else: st.error("Stok Habis!")
+                    # Mencari ID produk yang cocok dengan Nama + Opsi yang dipilih
+                    selected_std_opt = standardize_options(", ".join(p_user_selection))
+                    
+                    target_product = None
+                    for _, row in all_variations.iterrows():
+                        if standardize_options(row['opsi']) == selected_std_opt:
+                            target_product = row
+                            break
+                    
+                    if target_product is not None:
+                        if int(target_product['stok']) >= qty_p:
+                            st.session_state.cart.append({
+                                "id": int(target_product['id']), 
+                                "nama": item_p_name, 
+                                "qty": int(qty_p),
+                                "harga": float(target_product['harga']), 
+                                "subtotal": float(target_product['harga'] * qty_p),
+                                "opsi": ", ".join(p_user_selection)
+                            })
+                            st.rerun()
+                        else: st.error(f"Stok tidak cukup! (Sisa: {target_product['stok']})")
+                    else:
+                        st.error("Kombinasi produk & opsi ini tidak tersedia di menu.")
+            else:
+                st.info("Produk tidak ditemukan di kategori ini.")
 
     with col_cart:
         if st.session_state.last_tx and not st.session_state.cart:
             st.success(f"✅ Transaksi Berhasil! (ID: {st.session_state.last_tx['id_tx']})")
             df_last = pd.DataFrame(st.session_state.last_tx['items'])
-            # Formatting tampilan tabel struk
             df_last_disp = df_last.copy()
             df_last_disp['harga'] = df_last_disp['harga'].map("Rp{:,.0f}".format)
             df_last_disp['subtotal'] = df_last_disp['subtotal'].map("Rp{:,.0f}".format)
@@ -125,23 +147,18 @@ def cashier_ui():
             st.subheader("🛒 Keranjang")
             df_cart = pd.DataFrame(st.session_state.cart)
             total = sum(i['subtotal'] for i in st.session_state.cart)
-            
-            # Formatting tampilan keranjang
             df_disp = df_cart.copy()
             df_disp['subtotal'] = df_disp['subtotal'].map("Rp{:,.0f}".format)
             st.table(df_disp[['nama', 'opsi', 'qty', 'subtotal']])
-            
             st.write(f"### TOTAL: Rp{total:,.0f}")
+            
             if st.button("✅ SELESAIKAN", type="primary", use_container_width=True):
                 id_tx = datetime.now().strftime("%Y%m%d%H%M%S")
                 st.session_state.last_tx = {"id_tx": id_tx, "items": list(st.session_state.cart)}
-                
                 for b in st.session_state.cart:
                     con.execute("UPDATE produk SET stok = stok - ? WHERE id = ?", [b['qty'], b['id']])
-                    # Masukkan data ke database tanpa string formatting agar bisa dihitung nantinya
                     con.execute("INSERT INTO transaksi VALUES (?, ?, ?, ?, ?, ?, ?)", 
                                 [id_tx, b['nama'], int(b['qty']), float(b['subtotal']), st.session_state.username, datetime.now(), b['opsi']])
-                
                 refresh_label_stocks()
                 st.session_state.cart = []
                 st.rerun()
@@ -151,7 +168,8 @@ def admin_ui():
     menu = st.sidebar.selectbox("Menu", ["Dashboard", "Produk", "Label", "Transaksi"])
     
     if menu == "Dashboard":
-        h = con.execute("SELECT SUM(total_harga) FROM transaksi WHERE CAST(waktu AS DATE) = CURRENT_DATE").fetchone()[0] or 0
+        res_h = con.execute("SELECT SUM(total_harga) FROM transaksi WHERE CAST(waktu AS DATE) = CURRENT_DATE").fetchone()
+        h = res_h[0] if res_h and res_h[0] is not None else 0
         st.metric("Omset Hari Ini", f"Rp{h:,.0f}")
         df_tx = con.execute("SELECT * FROM transaksi").df()
         if not df_tx.empty:
@@ -168,7 +186,6 @@ def admin_ui():
         query += " ORDER BY id DESC"
         df_p = con.execute(query).df()
         
-        # Formatting harga di tabel daftar produk
         df_p_disp = df_p.copy()
         df_p_disp['harga'] = df_p_disp['harga'].map("Rp{:,.0f}".format)
         st.dataframe(df_p_disp.head(limit), use_container_width=True, hide_index=True)
@@ -197,8 +214,7 @@ def admin_ui():
                             nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
                             con.execute("INSERT INTO produk VALUES (?,?,?,?,?,?)", [nid, n, k, h, s, o])
                             refresh_label_stocks()
-                            st.success(f"✅ Tersimpan!")
-                            st.rerun()
+                            st.success(f"✅ Tersimpan!"); st.rerun()
 
         with tab_edit:
             if not df_p.empty:
@@ -245,7 +261,6 @@ def admin_ui():
         st.subheader("📜 Riwayat Transaksi")
         df_tx = con.execute("SELECT * FROM transaksi ORDER BY waktu DESC").df()
         if not df_tx.empty:
-            # PERBAIKAN: Formatting kolom total_harga agar tidak muncul 5000.0000
             df_tx_disp = df_tx.copy()
             df_tx_disp['total_harga'] = df_tx_disp['total_harga'].map("Rp{:,.0f}".format)
             st.dataframe(df_tx_disp, use_container_width=True, hide_index=True)
