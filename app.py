@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v3.3", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v3.4", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -15,7 +15,6 @@ def get_connection():
             st.error("Missing MOTHERDUCK_TOKEN in secrets!")
             st.stop()
         TOKEN = st.secrets["MOTHERDUCK_TOKEN"]
-        # Koneksi ke MotherDuck
         return duckdb.connect(f"md:tes_db?motherduck_token={TOKEN}")
     except Exception as e:
         st.error(f"Gagal koneksi ke MotherDuck: {e}")
@@ -23,9 +22,8 @@ def get_connection():
 
 con = get_connection()
 
-# --- 3. LOGIKA SINKRONISASI STOK LABEL ---
+# --- 3. LOGIKA SINKRONISASI ---
 def sync_cumulative_label(opsi_string, delta_stok):
-    """Mengupdate stok bahan baku (label) berdasarkan perubahan stok produk"""
     if opsi_string and str(opsi_string) != "None" and delta_stok != 0:
         list_opsi = [item.strip() for item in opsi_string.split(",")]
         for item in list_opsi:
@@ -40,7 +38,6 @@ def sync_cumulative_label(opsi_string, delta_stok):
                             [int(new_lid), item, int(delta_stok), 'pcs'])
 
 # --- 4. UI COMPONENTS ---
-
 def login_ui():
     st.title("🔐 Login Sistem Kasir")
     with st.form("login_form"):
@@ -64,7 +61,7 @@ def cashier_ui():
     try:
         df_produk = con.execute("SELECT * FROM produk").df()
     except:
-        st.warning("Tabel produk belum siap atau kosong.")
+        st.warning("Tabel produk belum siap.")
         return
 
     col_input, col_cart = st.columns([1, 2])
@@ -88,7 +85,6 @@ def cashier_ui():
                     p_opsi = ", ".join(p_user)
 
                 if st.form_submit_button("➕ Tambah"):
-                    st.session_state.last_tx = None 
                     if int(row['stok']) >= qty_p:
                         st.session_state.cart.append({
                             "id": int(row['id']), "nama": item_p, "qty": int(qty_p),
@@ -102,9 +98,8 @@ def cashier_ui():
         if st.session_state.last_tx and not st.session_state.cart:
             st.success(f"✅ Transaksi Berhasil! (ID: {st.session_state.last_tx['id_tx']})")
             df_last = pd.DataFrame(st.session_state.last_tx['items'])
-            df_last['subtotal'] = df_last['subtotal'].map("Rp{:,.0f}".format)
             st.table(df_last[['nama', 'opsi', 'qty', 'subtotal']])
-            if st.button("🆕 Lanjut", type="primary"):
+            if st.button("🆕 Transaksi Baru"):
                 st.session_state.last_tx = None
                 st.rerun()
 
@@ -112,27 +107,18 @@ def cashier_ui():
             st.subheader("🛒 Keranjang")
             df_cart = pd.DataFrame(st.session_state.cart)
             total = sum(i['subtotal'] for i in st.session_state.cart)
-            df_disp = df_cart.copy()
-            df_disp['subtotal'] = df_disp['subtotal'].map("Rp{:,.0f}".format)
-            st.table(df_disp[['nama', 'opsi', 'qty', 'subtotal']])
+            st.table(df_cart[['nama', 'opsi', 'qty', 'subtotal']])
             st.write(f"### TOTAL: Rp{total:,.0f}")
-            
             if st.button("✅ SELESAIKAN", type="primary", use_container_width=True):
                 id_tx = datetime.now().strftime("%Y%m%d%H%M%S")
-                st.session_state.last_tx = {"id_tx": id_tx, "items": list(st.session_state.cart), "total": total}
-                
+                st.session_state.last_tx = {"id_tx": id_tx, "items": list(st.session_state.cart)}
                 for b in st.session_state.cart:
-                    # Update stok produk
                     con.execute("UPDATE produk SET stok = stok - ? WHERE id = ?", [b['qty'], b['id']])
-                    # Update stok label/bahan baku
                     if b['opsi']: sync_cumulative_label(b['opsi'], -b['qty'])
-                    # Simpan transaksi
                     con.execute("INSERT INTO transaksi VALUES (?, ?, ?, ?, ?, ?, ?)", 
                                 [id_tx, b['nama'], b['qty'], b['subtotal'], st.session_state.username, datetime.now(), b['opsi']])
-                
                 st.session_state.cart = []
                 st.rerun()
-        else: st.info("Siap melayani.")
 
 def admin_ui():
     st.title("🏗️ Panel Admin")
@@ -146,51 +132,80 @@ def admin_ui():
             st.plotly_chart(px.bar(df_tx, x='waktu', y='total_harga', color='nama_produk'), use_container_width=True)
 
     elif menu == "Produk":
-        st.subheader("📦 Manajemen Data Produk")
-        df_p = con.execute("SELECT * FROM produk ORDER BY id ASC").df()
+        st.subheader("📦 Daftar Produk")
         
-        tab1, tab2, tab3, tab4 = st.tabs(["📄 Daftar", "➕ Tambah", "✏️ Edit", "🗑️ Hapus"])
+        # Pengaturan Tampilan & Pencarian
+        col_f1, col_f2 = st.columns([2, 1])
+        with col_f1:
+            search = st.text_input("🔍 Cari Produk...")
+        with col_f2:
+            limit = st.number_input("Tampilkan Baris", min_value=5, max_value=100, value=10)
 
-        with tab1:
-            st.dataframe(df_p, use_container_width=True, hide_index=True)
+        # Ambil data
+        query = "SELECT * FROM produk"
+        if search:
+            query += f" WHERE LOWER(nama_produk) LIKE LOWER('%{search}%')"
+        query += " ORDER BY id DESC"
+        
+        df_p = con.execute(query).df()
+        
+        # Tampilkan tabel (Terbatas 10 item secara visual tapi bisa diatur)
+        st.dataframe(df_p.head(limit), use_container_width=True, hide_index=True)
+        if len(df_p) > limit:
+            st.info(f"Menampilkan {limit} dari {len(df_p)} produk. Gunakan fitur cari atau tambah limit baris.")
 
-        with tab2:
-            with st.form("add_p", clear_on_submit=True):
-                col1, col2 = st.columns(2)
-                with col1:
+        st.markdown("---")
+        st.subheader("🛠️ Kelola Data Produk")
+        
+        # CRUD Form di bawah tabel
+        tab_add, tab_edit, tab_del = st.tabs(["➕ Tambah Baru", "✏️ Edit Produk", "🗑️ Hapus Produk"])
+
+        with tab_add:
+            with st.form("form_add", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                with c1:
                     n = st.text_input("Nama Produk")
                     k = st.selectbox("Kategori", ["Minuman", "Makanan", "Snack"])
-                    o = st.text_input("Opsi (Pisah koma)")
-                with col2:
+                with c2:
                     h = st.number_input("Harga", min_value=0, step=500)
                     s = st.number_input("Stok Awal", min_value=0, step=1)
-                if st.form_submit_button("Simpan"):
-                    nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
-                    con.execute("INSERT INTO produk VALUES (?,?,?,?,?,?)", [nid, n, k, h, s, o])
-                    sync_cumulative_label(o, s)
-                    st.success("Berhasil ditambah!"); st.rerun()
+                o = st.text_input("Opsi/Label (Pisahkan dengan koma)")
+                if st.form_submit_button("Simpan Produk"):
+                    if n:
+                        nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
+                        con.execute("INSERT INTO produk VALUES (?,?,?,?,?,?)", [nid, n, k, h, s, o])
+                        sync_cumulative_label(o, s)
+                        st.success(f"✅ Berhasil menambah produk: {n}")
+                        st.rerun()
+                    else: st.error("Nama tidak boleh kosong")
 
-        with tab3:
+        with tab_edit:
             if not df_p.empty:
-                sel_edit = st.selectbox("Pilih Produk Edit", df_p['nama_produk'])
+                sel_edit = st.selectbox("Pilih Produk yang akan diubah", df_p['nama_produk'].sort_values())
                 row = df_p[df_p['nama_produk'] == sel_edit].iloc[0]
-                with st.form("edit_form"):
-                    en = st.text_input("Nama", value=row['nama_produk'])
-                    eh = st.number_input("Harga", value=float(row['harga']))
-                    es = st.number_input("Stok", value=int(row['stok']))
-                    eo = st.text_input("Opsi", value=str(row['opsi']) if row['opsi'] else "")
-                    if st.form_submit_button("Update"):
+                with st.form("form_edit"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        en = st.text_input("Nama Produk", value=row['nama_produk'])
+                        eh = st.number_input("Harga", value=float(row['harga']))
+                    with c2:
+                        es = st.number_input("Stok", value=int(row['stok']))
+                        eo = st.text_input("Opsi", value=str(row['opsi']) if row['opsi'] else "")
+                    if st.form_submit_button("Update Data"):
                         delta = es - int(row['stok'])
-                        con.execute("UPDATE produk SET nama_produk=?, harga=?, stok=?, opsi=? WHERE id=?", [en, eh, es, eo, int(row['id'])])
+                        con.execute("UPDATE produk SET nama_produk=?, harga=?, stok=?, opsi=? WHERE id=?", 
+                                    [en, eh, es, eo, int(row['id'])])
                         if eo: sync_cumulative_label(eo, delta)
-                        st.success("Berhasil diupdate!"); st.rerun()
+                        st.success(f"✅ Berhasil memperbarui: {en}")
+                        st.rerun()
 
-        with tab4:
+        with tab_del:
             if not df_p.empty:
-                sel_del = st.selectbox("Pilih Produk Hapus", df_p['nama_produk'], key="del_p")
-                if st.button("🔥 HAPUS PERMANEN", use_container_width=True):
-                    con.execute("DELETE FROM produk WHERE nama_produk=?", [sel_del])
-                    st.error(f"{sel_del} dihapus!"); st.rerun()
+                sel_del = st.selectbox("Pilih Produk yang akan dihapus", df_p['nama_produk'].sort_values(), key="del_box")
+                if st.button("🔥 KONFIRMASI HAPUS PERMANEN", use_container_width=True):
+                    con.execute("DELETE FROM produk WHERE nama_produk = ?", [sel_del])
+                    st.success(f"🗑️ Produk '{sel_del}' telah dihapus!")
+                    st.rerun()
 
     elif menu == "Label":
         st.subheader("🏷️ Stok Label / Bahan Baku")
@@ -202,6 +217,7 @@ def admin_ui():
                 asl = st.number_input("Koreksi (+/-)", value=0)
                 if st.form_submit_button("Update"):
                     con.execute("UPDATE label_stok SET stok=stok+? WHERE nama_label=?", [asl, sel_l])
+                    st.success("✅ Stok label diperbarui")
                     st.rerun()
 
     elif menu == "Transaksi":
@@ -212,7 +228,7 @@ def admin_ui():
 if "logged_in" not in st.session_state:
     login_ui()
 else:
-    st.sidebar.write(f"User: **{st.session_state.username}** ({st.session_state.role})")
+    st.sidebar.write(f"User: **{st.session_state.username}**")
     if st.sidebar.button("Logout"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
