@@ -242,22 +242,29 @@ def admin_ui():
 
         # 3. Grafik Penjualan dengan Legenda
         df_tx = con.execute("SELECT * FROM transaksi").df()
-        if not df_tx.empty: 
+        if not df_tx.empty:
             df_tx['waktu'] = pd.to_datetime(df_tx['waktu'])
             
-            # Menambahkan 'color' agar muncul legenda berdasarkan nama produk
+            # Cek kolom yang tersedia di dataframe vs yang diminta Plotly
+            cols_needed = ['waktu', 'total_harga', 'nama_produk', 'opsi_detail', 'qty']
+            cols_available = df_tx.columns.tolist()
+            
+            # Filter hanya kolom yang benar-benar ada agar tidak Error
+            hover_cols = [c for c in ['opsi_detail', 'qty'] if c in cols_available]
+            
             fig = px.bar(
-                df_tx, 
-                x='waktu', 
-                y='total_harga', 
-                color='nama_produk', # Legenda item
-                title="Laporan Penjualan (Detail per Item)",
-                labels={'total_harga': 'Total Harga (Rp)', 'waktu': 'Waktu Transaksi', 'nama_produk': 'Produk'},
-                hover_data=['opsi_detail', 'qty'] # Keterangan tambahan saat kursor diarahkan ke grafik
+                df_tx,
+                x='waktu' if 'waktu' in cols_available else df_tx.columns[0],
+                y='total_harga' if 'total_harga' in cols_available else df_tx.columns[1],
+                color='nama_produk' if 'nama_produk' in cols_available else None,
+                hover_data=hover_cols,
+                title="Laporan Penjualan",
+                labels={'total_harga': 'Total (Rp)', 'waktu': 'Tanggal'},
+                template="plotly_white"
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Belum ada data transaksi untuk ditampilkan pada grafik.")
+            st.info("Belum ada data transaksi.")
 
     elif menu == "Transaksi":
         df_tx = con.execute("SELECT * FROM transaksi ORDER BY waktu DESC").df()
