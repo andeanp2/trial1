@@ -117,56 +117,59 @@ def cashier_ui():
 
         # --- 1. TAMPILAN SETELAH TRANSAKSI BERHASIL ---
         if st.session_state.last_cart and not st.session_state.cart:
-            st.success("✅ Transaksi Berhasil Disimpan!")
-            st.subheader("📋 Rincian Transaksi Terakhir")
+            st.success("✅ Transaksi Berhasil!")
             df_last = pd.DataFrame(st.session_state.last_cart)
-            st.dataframe(
-                df_last[['nama', 'opsi_txt', 'qty', 'subtotal']],
-                column_config={
-                    "nama": "Produk", "opsi_txt": "Add-On",
-                    "subtotal": st.column_config.NumberColumn("Subtotal", format="Rp %d")
-                },
-                width="stretch", hide_index=True
-            )
-            if st.button("🛒 Buat Transaksi Baru", type="secondary", width="stretch"):
+            st.dataframe(df_last[['nama', 'qty', 'subtotal']], width="stretch", hide_index=True)
+            if st.button("🛒 Transaksi Baru", type="secondary", width="stretch"):
                 st.session_state.last_cart = None
                 st.rerun()
 
         # --- 2. TAMPILAN KERANJANG AKTIF ---
         elif st.session_state.cart:
-            st.subheader("🛒 Keranjang Aktif")
+            st.subheader("🛒 Keranjang")
             
-            # Tampilkan tabel ringkasan
-            df_cart = pd.DataFrame(st.session_state.cart)
-            st.dataframe(
-                df_cart[['nama', 'opsi_txt', 'qty', 'subtotal']],
-                column_config={
-                    "nama": "Produk", "opsi_txt": "Add-On",
-                    "subtotal": st.column_config.NumberColumn("Subtotal", format="Rp %d")
-                },
-                width="stretch", hide_index=True
-            )
+            # Header Tabel Manual
+            h1, h2, h3, h4 = st.columns([3, 1, 1.5, 0.5])
+            h1.caption("PRODUK")
+            h2.caption("QTY")
+            h3.caption("SUBTOTAL")
+            h4.write("") # Kolom Action
 
-            # --- FITUR EDIT/HAPUS ITEM ---
-            with st.expander("✏️ Edit / Hapus Item"):
-                for i, item in enumerate(st.session_state.cart):
-                    c_info, c_btn = st.columns([3, 1])
-                    c_info.write(f"**{item['nama']}** ({item['qty']}x) - {item['opsi_txt']}")
-                    if c_btn.button("🗑️", key=f"del_{i}", help="Hapus item ini"):
+            # Loop Item Keranjang
+            for i, item in enumerate(st.session_state.cart):
+                with st.container():
+                    c1, c2, c3, c4 = st.columns([3, 1, 1.5, 0.5])
+                    
+                    # Kolom 1: Nama & Detail
+                    c1.write(f"**{item['nama']}**")
+                    if item['opsi_txt']:
+                        c1.caption(f"Add-on: {item['opsi_txt']}")
+                    
+                    # Kolom 2: Qty
+                    c2.write(f"{item['qty']}")
+                    
+                    # Kolom 3: Harga
+                    c3.write(f"Rp{item['subtotal']:,.0f}")
+                    
+                    # Kolom 4: Icon Hapus (Pojok Kanan)
+                    if c4.button("🗑️", key=f"del_{i}", help="Hapus item"):
                         st.session_state.cart.pop(i)
                         st.rerun()
-                
-                if st.button("🧹 Kosongkan Keranjang", type="secondary", width="stretch"):
-                    st.session_state.cart = []
-                    st.rerun()
+                st.divider()
 
-            st.divider()
+            # Bagian Bawah: Total & Aksi
             total = sum(i['subtotal'] for i in st.session_state.cart)
-            st.write(f"### TOTAL BAYAR: Rp{total:,.0f}")
+            st.write(f"### TOTAL: Rp{total:,.0f}")
 
-            if st.button("✅ SELESAIKAN", type="primary", width="stretch"):
+            col_act1, col_act2 = st.columns(2)
+            if col_act1.button("🧹 Kosongkan", type="secondary", width="stretch"):
+                st.session_state.cart = []
+                st.rerun()
+            
+            if col_act2.button("✅ SELESAIKAN", type="primary", width="stretch"):
                 id_tx = get_now_wib().strftime("%Y%m%d%H%M%S")
                 for b in st.session_state.cart:
+                    # Logika Database (Update stok & simpan transaksi)
                     con.execute("UPDATE produk SET stok = stok - ? WHERE id = ?", [int(b['qty']), int(b['id'])])
                     for addon_name in b['opsi_list']:
                         con.execute("UPDATE master_label SET stok = stok - ? WHERE nama_label = ?", [int(b['qty']), addon_name])
