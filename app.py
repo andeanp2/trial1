@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta, timezone
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v4.3", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v1.0", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -15,6 +15,7 @@ def get_connection():
             st.error("Missing MOTHERDUCK_TOKEN in secrets!")
             st.stop()
         TOKEN = st.secrets["MOTHERDUCK_TOKEN"]
+        # Menghubungkan ke MotherDuck
         return duckdb.connect(f"md:tes_db?motherduck_token={TOKEN}")
     except Exception as e:
         st.error(f"Gagal koneksi ke MotherDuck: {e}")
@@ -23,12 +24,9 @@ def get_connection():
 con = get_connection()
 
 # --- 3. LOGIKA HELPER & WAKTU (WIB) ---
-
-# Definisi zona waktu WIB
 WIB = timezone(timedelta(hours=7))
 
 def get_now_wib():
-    """Mengambil waktu sekarang langsung dalam format WIB"""
     return datetime.now(timezone.utc).astimezone(WIB)
 
 def standardize_options(opsi_string):
@@ -39,18 +37,20 @@ def standardize_options(opsi_string):
     return ", ".join(parts)
 
 def refresh_label_stocks():
+    """Menghitung ulang total stok berdasarkan label/opsi unik"""
     try:
         df_all = con.execute("SELECT opsi, stok FROM produk WHERE opsi IS NOT NULL AND opsi != ''").df()
+        con.execute("DELETE FROM label_stok") # Reset tabel label
+        
         if df_all.empty:
-            con.execute("DELETE FROM label_stok")
             return
+            
         label_map = {}
         for _, row in df_all.iterrows():
             opsi_list = [o.strip().lower() for o in str(row['opsi']).split(",") if o.strip()]
             for label in opsi_list:
                 label_map[label] = label_map.get(label, 0) + int(row['stok'])
         
-        con.execute("DELETE FROM label_stok")
         for i, (nama_label, total_stok) in enumerate(label_map.items()):
             con.execute("INSERT INTO label_stok VALUES (?, ?, ?, ?)", [i + 1, nama_label, total_stok, 'pcs'])
     except Exception as e:
@@ -70,7 +70,8 @@ def login_ui():
                 st.session_state.username = user
                 st.session_state.role = res[0]
                 st.rerun()
-            else: st.error("Username atau Password salah!")
+            else: 
+                st.error("Username atau Password salah!")
 
 def cashier_ui():
     now_wib = get_now_wib()
@@ -90,7 +91,7 @@ def cashier_ui():
 
     with col_input:
         st.subheader("Input Pesanan")
-        list_kat = ["Semua"] + list(df_produk['kategori'].unique()) if not df_produk.empty else ["Semua"]
+        list_kat = ["Semua"] + sorted(list(df_produk['kategori'].unique())) if not df_produk.empty else ["Semua"]
         f_kat = st.selectbox("Filter Kategori", list_kat)
         df_filtered = df_produk if f_kat == "Semua" else df_produk[df_produk['kategori'] == f_kat]
 
@@ -110,8 +111,8 @@ def cashier_ui():
                 qty_p = st.number_input("Jumlah", min_value=1, step=1)
 
                 if st.form_submit_button("➕ Tambah"):
-                    # Validasi Konflik
                     selected_lower = [s.lower() for s in p_user_selection]
+                    # Validasi Logika Bisnis Sederhana
                     if "dingin" in selected_lower and "hangat" in selected_lower:
                         st.error("⚠️ Tidak bisa pilih Dingin & Hangat bersamaan!")
                     elif "cup besar" in selected_lower and "cup kecil" in selected_lower:
@@ -159,11 +160,12 @@ def cashier_ui():
                 current_wib = get_now_wib()
                 id_tx = current_wib.strftime("%Y%m%d%H%M%S")
                 st.session_state.last_tx = {"id_tx": id_tx, "items": list(st.session_state.cart)}
+                
                 for b in st.session_state.cart:
                     con.execute("UPDATE produk SET stok = stok - ? WHERE id = ?", [b['qty'], b['id']])
-                    # Simpan sebagai timestamp tanpa timezone agar tidak dikonversi ulang oleh DuckDB
                     con.execute("INSERT INTO transaksi VALUES (?, ?, ?, ?, ?, ?, ?)", 
                                 [id_tx, b['nama'], int(b['qty']), float(b['subtotal']), st.session_state.username, current_wib.replace(tzinfo=None), b['opsi']])
+                
                 refresh_label_stocks()
                 st.session_state.cart = []
                 st.rerun()
@@ -181,7 +183,7 @@ def admin_ui():
         st.metric("Omset Hari Ini (WIB)", f"Rp{h:,.0f}")
         df_tx = con.execute("SELECT * FROM transaksi").df()
         if not df_tx.empty:
-            st.plotly_chart(px.bar(df_tx, x='waktu', y='total_harga', color='nama_produk'), use_container_width=True)
+            st.plotly_chart(px.bar(df_tx, x='waktu', y='total_harga', color='nama_produk', title="Trend Penjualan"), use_container_width=True)
 
     elif menu == "Produk":
         st.subheader("📦 Daftar Produk")
@@ -192,33 +194,85 @@ def admin_ui():
 
         st.markdown("---")
         st.subheader("🛠️ Kelola Produk")
-        t1, t2, t3, t4 = st.tabs(["➕ Tambah", "✏️ Edit", "📦 Stok", "🗑️ Hapus"])
-        # (Logika tab tetap sama dengan v4.2, hanya pastikan memanggil refresh_label_stocks())
+        t1, t2, t3, t4 = st.tabs(["➕ Tambah", "✏️ Edit", "📦 Update Stok", "🗑️ Hapus"])
+        
+        # TAB 1: TAMBAH PRODUK
         with t1:
             with st.form("f_add", clear_on_submit=True):
-                n = st.text_input("Nama"); k = st.selectbox("Kat", ["Minuman", "Makanan", "Snack"])
-                h = st.number_input("Harga", step=500); s = st.number_input("Stok", step=1)
-                o = st.text_input("Opsi")
-                if st.form_submit_button("Simpan"):
+                n = st.text_input("Nama Produk")
+                k = st.selectbox("Kategori", ["Minuman", "Makanan", "Fashin"])
+                h = st.number_input("Harga", min_value=0, step=500)
+                s = st.number_input("Stok Awal", min_value=0, step=1)
+                o = st.text_input("Opsi (Pisahkan dengan koma, contoh: Dingin, Hangat)")
+                if st.form_submit_button("Simpan Produk"):
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
                     con.execute("INSERT INTO produk VALUES (?,?,?,?,?,?)", [nid, n, k, h, s, o])
-                    refresh_label_stocks(); st.success("Simpan!"); st.rerun()
-        # ... (Selesaikan tab lainnya jika perlu)
+                    refresh_label_stocks()
+                    st.success(f"Produk {n} Berhasil Ditambahkan!")
+                    st.rerun()
+
+        # TAB 2: EDIT PRODUK
+        with t2:
+            if not df_p.empty:
+                edit_id = st.selectbox("Pilih ID Produk untuk di-Edit", df_p['id'].tolist())
+                item_data = df_p[df_p['id'] == edit_id].iloc[0]
+                
+                with st.form("f_edit"):
+                    new_n = st.text_input("Nama Produk", value=item_data['nama_produk'])
+                    new_k = st.selectbox("Kategori", ["Minuman", "Makanan", "Fashion"], 
+                                         index=["Minuman", "Makanan", "Fashion"].index(item_data['kategori']))
+                    new_h = st.number_input("Harga", value=float(item_data['harga']), step=500.0)
+                    new_o = st.text_input("Opsi", value=item_data['opsi'])
+                    
+                    if st.form_submit_button("Update Data"):
+                        con.execute("""UPDATE produk SET nama_produk=?, kategori=?, harga=?, opsi=? 
+                                    WHERE id=?""", [new_n, new_k, new_h, new_o, edit_id])
+                        refresh_label_stocks()
+                        st.success("Update Berhasil!")
+                        st.rerun()
+            else: st.info("Tidak ada data.")
+
+        # TAB 3: UPDATE STOK (QUICK)
+        with t3:
+            if not df_p.empty:
+                stok_id = st.selectbox("Pilih Produk (Update Stok)", df_p['id'].tolist(), key="stok_sel")
+                curr_stok = df_p[df_p['id'] == stok_id]['stok'].values[0]
+                st.write(f"Stok Sekarang: **{curr_stok}**")
+                
+                new_stok_val = st.number_input("Set Stok Baru", min_value=0, step=1, value=int(curr_stok))
+                if st.button("Update Stok"):
+                    con.execute("UPDATE produk SET stok=? WHERE id=?", [new_stok_val, stok_id])
+                    refresh_label_stocks()
+                    st.success("Stok Berhasil diperbarui!")
+                    st.rerun()
+
+        # TAB 4: HAPUS PRODUK
+        with t4:
+            if not df_p.empty:
+                del_id = st.selectbox("Pilih ID Produk untuk di-HAPUS", df_p['id'].tolist(), key="del_sel")
+                target_name = df_p[df_p['id'] == del_id]['nama_produk'].values[0]
+                st.warning(f"Apakah Anda yakin ingin menghapus **{target_name}** (ID: {del_id})?")
+                if st.button("🔥 HAPUS PERMANEN", type="secondary"):
+                    con.execute("DELETE FROM produk WHERE id=?", [del_id])
+                    refresh_label_stocks()
+                    st.success("Produk Dihapus!")
+                    st.rerun()
 
     elif menu == "Label":
         st.subheader("🏷️ Akumulasi Stok per Label")
+        refresh_label_stocks() # Pastikan data terbaru
         df_l = con.execute("SELECT * FROM label_stok ORDER BY stok DESC").df()
-        st.dataframe(df_l, use_container_width=True, hide_index=True)
+        if not df_l.empty:
+            st.dataframe(df_l, use_container_width=True, hide_index=True)
+        else:
+            st.info("Belum ada label/opsi yang terdaftar pada produk.")
 
     elif menu == "Transaksi":
         st.subheader("📜 Riwayat Transaksi")
         df_tx = con.execute("SELECT * FROM transaksi ORDER BY waktu DESC").df()
         if not df_tx.empty:
             df_tx_disp = df_tx.copy()
-            # PAKSA KONVERSI: Jika DuckDB mengembalikan UTC, kita paksa tambah 7 jam secara manual di tampilan
-            df_tx_disp['waktu'] = pd.to_datetime(df_tx_disp['waktu'])
-            # Hanya tambahkan 7 jam jika waktu di DB terdeteksi sebagai UTC (selisih 7 jam dari jam sekarang)
-            df_tx_disp['waktu'] = df_tx_disp['waktu'].dt.strftime('%d/%m/%Y %H:%M:%S')
+            df_tx_disp['waktu'] = pd.to_datetime(df_tx_disp['waktu']).dt.strftime('%d/%m/%Y %H:%M:%S')
             df_tx_disp['total_harga'] = df_tx_disp['total_harga'].map("Rp{:,.0f}".format)
             st.dataframe(df_tx_disp, use_container_width=True, hide_index=True)
         else: st.info("Belum ada transaksi.")
@@ -227,9 +281,12 @@ def admin_ui():
 if "logged_in" not in st.session_state:
     login_ui()
 else:
-    st.sidebar.write(f"User: **{st.session_state.username}**")
+    st.sidebar.write(f"User: **{st.session_state.username}** ({st.session_state.role})")
     if st.sidebar.button("Logout"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
-    if st.session_state.role == "admin": admin_ui()
-    else: cashier_ui()
+    
+    if st.session_state.role == "admin": 
+        admin_ui()
+    else: 
+        cashier_ui()
