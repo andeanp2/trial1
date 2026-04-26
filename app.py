@@ -150,7 +150,7 @@ def admin_ui():
 
                 if st.form_submit_button("Simpan Produk"):
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
-                    con.execute("INSERT INTO produk VALUES (?,?,?,?,?)", [nid, n, k, h, s ])
+                    con.execute("INSERT INTO produk VALUES (?,?,?,?,?,?)", [nid, n, k, h, s, ""])
                     st.success("Produk ditambahkan!"); st.rerun()
         
         with t2:
