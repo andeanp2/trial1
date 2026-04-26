@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta, timezone
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Clean Integrity", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Final Stable", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -142,46 +142,47 @@ def admin_ui():
                 h = st.number_input("Harga", min_value=0, step=500)
                 s = st.number_input("Stok Awal", min_value=0)
                 
-                # Warning atas (real-time) dihapus sesuai perintah
-
                 if st.form_submit_button("Simpan Produk"):
                     if not n.strip(): st.error("Nama tidak boleh kosong!"); return
-                    
-                    # Cek duplikat di database (Gunakan yang bawah saja)
                     is_dup = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [n.strip()]).fetchone()[0]
                     if is_dup > 0:
-                        st.error(f"Gagal! Produk '{n.strip()}' sudah ada di database."); return
-                    
+                        st.error(f"Gagal! Produk '{n.strip()}' sudah ada."); return
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
                     con.execute("INSERT INTO produk (id, nama_produk, kategori, harga, stok) VALUES (?,?,?,?,?)", [nid, n.strip(), k, h, s])
                     st.success("Produk ditambahkan!"); st.rerun()
         
         with t2:
             if not df_p.empty:
-                p_target = st.selectbox("Pilih Produk (Edit)", df_p['nama_produk'].tolist())
-                curr = df_p[df_p['nama_produk'] == p_target].iloc[0]
+                # Menggunakan ID sebagai key selectbox
+                p_target_id = st.selectbox("Pilih Produk (Edit)", df_p['id'].tolist(), 
+                                           format_func=lambda x: df_p[df_p['id']==x]['nama_produk'].values[0])
+                curr = df_p[df_p['id'] == p_target_id].iloc[0]
                 with st.form("f_edit_p"):
                     en = st.text_input("Nama Baru", value=curr['nama_produk'])
                     ek = st.selectbox("Kategori", list_kategori, index=list_kategori.index(curr['kategori']))
                     eh = st.number_input("Harga", value=float(curr['harga']))
                     if st.form_submit_button("Update Data"):
-                        con.execute("UPDATE produk SET nama_produk=?, kategori=?, harga=? WHERE id=?", [en.strip(), ek, eh, int(curr['id'])])
+                        con.execute("UPDATE produk SET nama_produk=?, kategori=?, harga=? WHERE id=?", [en.strip(), ek, eh, p_target_id])
                         st.success("Produk diperbarui!"); st.rerun()
 
         with t3:
             if not df_p.empty:
-                p_stok_name = st.selectbox("Pilih Produk (Stok)", df_p['nama_produk'].tolist())
-                curr_s = df_p[df_p['nama_produk'] == p_stok_name]['stok'].values[0]
+                # FIX: Gunakan ID untuk update stok
+                p_stok_id = st.selectbox("Pilih Produk (Stok)", df_p['id'].tolist(), 
+                                         format_func=lambda x: f"{df_p[df_p['id']==x]['nama_produk'].values[0]} (ID: {x})")
+                curr_s = df_p[df_p['id'] == p_stok_id]['stok'].values[0]
                 ns = st.number_input("Stok Baru", min_value=0, value=int(curr_s))
                 if st.button("Update Stok Produk"):
-                    con.execute("UPDATE produk SET stok=? WHERE nama_produk=?", [ns, p_stok_name])
+                    con.execute("UPDATE produk SET stok=? WHERE id=?", [ns, p_stok_id])
                     st.success("Stok diperbarui!"); st.rerun()
 
         with t4:
             if not df_p.empty:
-                p_del = st.selectbox("Pilih Produk (Hapus)", df_p['nama_produk'].tolist())
+                # FIX: Gunakan ID untuk hapus produk
+                p_del_id = st.selectbox("Pilih Produk (Hapus)", df_p['id'].tolist(), 
+                                         format_func=lambda x: f"{df_p[df_p['id']==x]['nama_produk'].values[0]} (ID: {x})")
                 if st.button("🔥 Hapus Produk Permanen"):
-                    con.execute("DELETE FROM produk WHERE nama_produk=?", [p_del])
+                    con.execute("DELETE FROM produk WHERE id=?", [p_del_id])
                     st.success("Produk dihapus!"); st.rerun()
 
     # --- 2. MENU ADD ON ---
@@ -198,20 +199,13 @@ def admin_ui():
                 kl = st.selectbox("Kategori", list_kategori, key="a_kat")
                 hl = st.number_input("Harga Tambahan", min_value=0, step=500)
                 sl = st.number_input("Stok Awal", min_value=0)
-                
-                # Warning atas (real-time) dihapus sesuai perintah
-
                 if st.form_submit_button("Simpan Add On"):
                     if not nl.strip(): st.error("Nama tidak boleh kosong!"); return
-                    
-                    # Cek duplikat di database (Gunakan yang bawah saja)
                     is_dup_a = con.execute("SELECT COUNT(*) FROM master_label WHERE LOWER(TRIM(nama_label)) = LOWER(?)", [nl.strip()]).fetchone()[0]
                     if is_dup_a > 0:
-                        st.error(f"Gagal! Add On '{nl.strip()}' sudah ada di database."); return
-                    
+                        st.error(f"Gagal! Add On '{nl.strip()}' sudah ada."); return
                     new_id = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM master_label").fetchone()[0]
-                    con.execute("INSERT INTO master_label (id, nama_label, kategori, harga, stok) VALUES (?,?,?,?,?)", 
-                                [new_id, nl.strip(), kl, hl, sl])
+                    con.execute("INSERT INTO master_label (id, nama_label, kategori, harga, stok) VALUES (?,?,?,?,?)", [new_id, nl.strip(), kl, hl, sl])
                     st.success("Add On ditambahkan!"); st.rerun()
         
         with t_l2:
@@ -228,6 +222,7 @@ def admin_ui():
 
         with t_l3:
             if not df_l.empty:
+                # FIX: Add On Stok update by ID
                 a_stok_id = st.selectbox("Pilih Add On (Stok)", df_l['id'].tolist(), format_func=lambda x: f"{df_l[df_l['id']==x]['nama_label'].values[0]}")
                 curr_sl = df_l[df_l['id'] == a_stok_id]['stok'].values[0]
                 new_sl = st.number_input("Set Stok Baru", min_value=0, value=int(curr_sl))
@@ -237,6 +232,7 @@ def admin_ui():
 
         with t_l4:
             if not df_l.empty:
+                # FIX: Add On Delete by ID
                 a_del_id = st.selectbox("Pilih Add On (Hapus)", df_l['id'].tolist(), format_func=lambda x: f"{df_l[df_l['id']==x]['nama_label'].values[0]}")
                 if st.button("🔥 Hapus Add On Permanen"):
                     con.execute("DELETE FROM master_label WHERE id=?", [a_del_id])
