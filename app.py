@@ -112,56 +112,60 @@ def cashier_ui():
                     st.rerun()
 
     with col_cart:
-        # Inisialisasi memori untuk keranjang terakhir jika belum ada
         if "last_cart" not in st.session_state:
             st.session_state.last_cart = None
 
-        # --- SKENARIO 1: JIKA TRANSAKSI BARU SAJA BERHASIL ---
+        # --- 1. TAMPILAN SETELAH TRANSAKSI BERHASIL ---
         if st.session_state.last_cart and not st.session_state.cart:
             st.success("✅ Transaksi Berhasil Disimpan!")
             st.subheader("📋 Rincian Transaksi Terakhir")
-            
             df_last = pd.DataFrame(st.session_state.last_cart)
             st.dataframe(
                 df_last[['nama', 'opsi_txt', 'qty', 'subtotal']],
                 column_config={
-                    "nama": "Produk",
-                    "opsi_txt": "Detail Add-On",
+                    "nama": "Produk", "opsi_txt": "Add-On",
                     "subtotal": st.column_config.NumberColumn("Subtotal", format="Rp %d")
                 },
-                width="stretch", # Update sesuai log: pengganti use_container_width=True
-                hide_index=True
+                width="stretch", hide_index=True
             )
-            total_last = sum(i['subtotal'] for i in st.session_state.last_cart)
-            st.write(f"**Total Terbayar: Rp{total_last:,.0f}**")
-            
             if st.button("🛒 Buat Transaksi Baru", type="secondary", width="stretch"):
                 st.session_state.last_cart = None
                 st.rerun()
 
-        # --- SKENARIO 2: JIKA KERANJANG SEDANG TERISI (PROSES BELANJA) ---
+        # --- 2. TAMPILAN KERANJANG AKTIF ---
         elif st.session_state.cart:
             st.subheader("🛒 Keranjang Aktif")
-            df_cart = pd.DataFrame(st.session_state.cart)
             
+            # Tampilkan tabel ringkasan
+            df_cart = pd.DataFrame(st.session_state.cart)
             st.dataframe(
                 df_cart[['nama', 'opsi_txt', 'qty', 'subtotal']],
                 column_config={
-                    "nama": "Produk",
-                    "opsi_txt": "Detail Add-On",
+                    "nama": "Produk", "opsi_txt": "Add-On",
                     "subtotal": st.column_config.NumberColumn("Subtotal", format="Rp %d")
                 },
-                width="stretch", # Update sesuai log
-                hide_index=True
+                width="stretch", hide_index=True
             )
 
+            # --- FITUR EDIT/HAPUS ITEM ---
+            with st.expander("✏️ Edit / Hapus Item"):
+                for i, item in enumerate(st.session_state.cart):
+                    c_info, c_btn = st.columns([3, 1])
+                    c_info.write(f"**{item['nama']}** ({item['qty']}x) - {item['opsi_txt']}")
+                    if c_btn.button("🗑️", key=f"del_{i}", help="Hapus item ini"):
+                        st.session_state.cart.pop(i)
+                        st.rerun()
+                
+                if st.button("🧹 Kosongkan Keranjang", type="secondary", width="stretch"):
+                    st.session_state.cart = []
+                    st.rerun()
+
+            st.divider()
             total = sum(i['subtotal'] for i in st.session_state.cart)
             st.write(f"### TOTAL BAYAR: Rp{total:,.0f}")
 
             if st.button("✅ SELESAIKAN", type="primary", width="stretch"):
                 id_tx = get_now_wib().strftime("%Y%m%d%H%M%S")
-                
-                # Simpan ke database
                 for b in st.session_state.cart:
                     con.execute("UPDATE produk SET stok = stok - ? WHERE id = ?", [int(b['qty']), int(b['id'])])
                     for addon_name in b['opsi_list']:
@@ -172,13 +176,12 @@ def cashier_ui():
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, [id_tx, b['nama'], int(b['qty']), float(b['subtotal']), st.session_state.username, get_now_wib().replace(tzinfo=None), b['opsi_txt']])
                 
-                # PINDAHKAN ke last_cart sebelum dihapus
                 st.session_state.last_cart = st.session_state.cart.copy()
                 st.session_state.cart = []
                 st.rerun()
         
         else:
-            st.info("Keranjang kosong. Silakan pilih produk.")
+            st.info("Keranjang kosong.")
 
 def admin_ui():
     st.title("🏗️ Panel Admin v1.8 (Updated)")
