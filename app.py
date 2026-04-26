@@ -224,12 +224,40 @@ def admin_ui():
                         st.success("Stok diperbarui!"); st.rerun()
 
     elif menu == "Dashboard":
-        res_h = con.execute("SELECT SUM(total_harga) FROM transaksi WHERE CAST(waktu AS DATE) = ?", [get_now_wib().strftime('%Y-%m-%d')]).fetchone()
-        st.metric("Omset Hari Ini", f"Rp{res_h[0] if res_h[0] else 0:,.0f}")
+        # 1. Hitung Omset Hari Ini
+        now = get_now_wib()
+        tgl_hari_ini = now.strftime('%Y-%m-%d')
+        res_h = con.execute("SELECT SUM(total_harga) FROM transaksi WHERE CAST(waktu AS DATE) = ?", [tgl_hari_ini]).fetchone()
+        omset_hari = res_h[0] if res_h[0] else 0
+
+        # 2. Hitung Omset Bulan Ini
+        bln_ini = now.strftime('%Y-%m')
+        res_m = con.execute("SELECT SUM(total_harga) FROM transaksi WHERE STRFTIME('%Y-%m', waktu) = ?", [bln_ini]).fetchone()
+        omset_bulan = res_m[0] if res_m[0] else 0
+
+        # Tampilkan Metrik
+        col_m1, col_m2 = st.columns(2)
+        col_m1.metric("Omset Hari Ini", f"Rp{omset_hari:,.0f}")
+        col_m2.metric("Omset Bulan Ini", f"Rp{omset_bulan:,.0f}")
+
+        # 3. Grafik Penjualan dengan Legenda
         df_tx = con.execute("SELECT * FROM transaksi").df()
         if not df_tx.empty: 
             df_tx['waktu'] = pd.to_datetime(df_tx['waktu'])
-            st.plotly_chart(px.bar(df_tx, x='waktu', y='total_harga', title="Laporan Penjualan"))
+            
+            # Menambahkan 'color' agar muncul legenda berdasarkan nama produk
+            fig = px.bar(
+                df_tx, 
+                x='waktu', 
+                y='total_harga', 
+                color='nama_produk', # Legenda item
+                title="Laporan Penjualan (Detail per Item)",
+                labels={'total_harga': 'Total Harga (Rp)', 'waktu': 'Waktu Transaksi', 'nama_produk': 'Produk'},
+                hover_data=['opsi_detail', 'qty'] # Keterangan tambahan saat kursor diarahkan ke grafik
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Belum ada data transaksi untuk ditampilkan pada grafik.")
 
     elif menu == "Transaksi":
         df_tx = con.execute("SELECT * FROM transaksi ORDER BY waktu DESC").df()
