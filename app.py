@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 # =================================================================
 # VERSI: 1.8 - FINAL STABLE BASELINE (ULTIMATE FIX)
-# FIX: Direct variable capture & Form wrapping untuk Update Stok
+# FITUR: Fix Bug Stok 0 pada Tambah Produk & Add On
 # =================================================================
 
 # --- 1. KONFIGURASI HALAMAN ---
@@ -55,7 +55,7 @@ def cashier_ui():
     if "cart" not in st.session_state: st.session_state.cart = []
 
     try:
-        df_produk = con.execute("SELECT * FROM produk").df()
+        df_produk = con.execute("SELECT id, nama_produk, kategori, harga, stok FROM produk").df()
     except:
         st.warning("Tabel produk belum siap."); return
 
@@ -67,7 +67,7 @@ def cashier_ui():
         f_kat = st.selectbox("Filter Kategori", list_kat)
         df_filtered = df_produk if f_kat == "Semua" else df_produk[df_produk['kategori'] == f_kat]
 
-        with st.form("form_cart", clear_on_submit=True):
+        with st.form("form_cart"):
             if not df_filtered.empty:
                 item_p_name = st.selectbox("Pilih Produk", sorted(df_filtered['nama_produk'].unique()))
                 selected_item_data = df_filtered[df_filtered['nama_produk'] == item_p_name].iloc[0]
@@ -86,7 +86,7 @@ def cashier_ui():
                         addon_data_map[label_display] = {"nama": row['nama_label'], "harga": float(row['harga']), "stok": int(row['stok'])}
                 
                 selected_addons_display = st.multiselect(f"Pilih Add On ({p_category}):", addon_options)
-                qty_p = st.number_input("Jumlah", min_value=1, step=1)
+                qty_p = st.number_input("Jumlah", min_value=1, step=1, key="qty_c")
 
                 if st.form_submit_button("➕ Tambah"):
                     if p_stok_prod < qty_p:
@@ -143,22 +143,39 @@ def admin_ui():
         t1, t2, t3, t4 = st.tabs(["➕ Tambah", "✏️ Edit", "📦 Stok", "🗑️ Hapus"])
         
         with t1:
-            with st.form("f_add_p"):
-                n_in = st.text_input("Nama Produk")
-                k_in = st.selectbox("Kategori", list_kategori)
-                h_in = st.number_input("Harga", min_value=0, step=500)
-                s_in = st.number_input("Stok Awal", min_value=0, step=1)
+            # FIX: Hapus clear_on_submit untuk menjamin data terbaca
+            with st.form("form_tambah_produk"):
+                st.text_input("Nama Produk", key="new_p_nama")
+                st.selectbox("Kategori", list_kategori, key="new_p_kat")
+                st.number_input("Harga", min_value=0, step=500, key="new_p_harga")
+                st.number_input("Stok Awal", min_value=0, step=1, key="new_p_stok")
                 
                 if st.form_submit_button("Simpan Produk"):
-                    if not n_in.strip(): st.error("Nama tidak boleh kosong!"); return
-                    is_dup = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [n_in.strip()]).fetchone()[0]
+                    # Ambil nilai langsung dari session_state
+                    val_n = st.session_state.new_p_nama
+                    val_k = st.session_state.new_p_kat
+                    val_h = st.session_state.new_p_harga
+                    val_s = st.session_state.new_p_stok
+
+                    if not val_n.strip(): 
+                        st.error("Nama tidak boleh kosong!"); return
+                    
+                    is_dup = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [val_n.strip()]).fetchone()[0]
                     if is_dup > 0:
-                        st.error(f"Gagal! Produk '{n_in.strip()}' sudah ada."); return
+                        st.error(f"Gagal! Produk '{val_n.strip()}' sudah ada."); return
                     
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
-                    con.execute("INSERT INTO produk (id, nama_produk, kategori, harga, stok) VALUES (?,?,?,?,?)", 
-                                [int(nid), n_in.strip(), k_in, float(h_in), int(s_in)])
-                    st.success(f"Berhasil! {n_in} tersimpan."); st.rerun()
+                    
+                    # LOGGING UNTUK DEBUG (Akan muncul di layar sebentar)
+                    # st.write(f"DEBUG: Menyimpan ID {nid}, Nama {val_n}, Stok {val_s}") 
+
+                    con.execute("""
+                        INSERT INTO produk (id, nama_produk, kategori, harga, stok) 
+                        VALUES (?, ?, ?, ?, ?)
+                    """, [int(nid), val_n.strip(), val_k, float(val_h), int(val_s)])
+                    
+                    st.success(f"Produk '{val_n}' dengan stok {int(val_s)} berhasil disimpan!")
+                    st.rerun()
         
         with t2:
             if not df_p.empty:
@@ -198,22 +215,31 @@ def admin_ui():
         t_l1, t_l2, t_l3, t_l4 = st.tabs(["➕ Tambah", "✏️ Edit", "📦 Stok", "🗑️ Hapus"])
         
         with t_l1:
-            with st.form("f_add_a"):
-                nl_in = st.text_input("Nama Add On")
-                kl_in = st.selectbox("Kategori", list_kategori)
-                hl_in = st.number_input("Harga Tambahan", min_value=0, step=500)
-                sl_in = st.number_input("Stok Awal", min_value=0, step=1)
+            with st.form("form_tambah_addon"):
+                st.text_input("Nama Add On", key="new_a_nama")
+                st.selectbox("Kategori", list_kategori, key="new_a_kat")
+                st.number_input("Harga Tambahan", min_value=0, step=500, key="new_a_harga")
+                st.number_input("Stok Awal", min_value=0, step=1, key="new_a_stok")
                 
                 if st.form_submit_button("Simpan Add On"):
-                    if not nl_in.strip(): st.error("Nama tidak boleh kosong!"); return
-                    is_dup_a = con.execute("SELECT COUNT(*) FROM master_label WHERE LOWER(TRIM(nama_label)) = LOWER(?)", [nl_in.strip()]).fetchone()[0]
+                    val_an = st.session_state.new_a_nama
+                    val_ak = st.session_state.new_a_kat
+                    val_ah = st.session_state.new_a_harga
+                    val_as = st.session_state.new_a_stok
+
+                    if not val_an.strip(): 
+                        st.error("Nama Add On tidak boleh kosong!"); return
+                    
+                    is_dup_a = con.execute("SELECT COUNT(*) FROM master_label WHERE LOWER(TRIM(nama_label)) = LOWER(?)", [val_an.strip()]).fetchone()[0]
                     if is_dup_a > 0:
-                        st.error(f"Gagal! Add On '{nl_in.strip()}' sudah ada."); return
+                        st.error(f"Gagal! Add On '{val_an.strip()}' sudah ada."); return
                     
                     new_id_a = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM master_label").fetchone()[0]
                     con.execute("INSERT INTO master_label (id, nama_label, kategori, harga, stok) VALUES (?,?,?,?,?)", 
-                                [int(new_id_a), nl_in.strip(), kl_in, float(hl_in), int(sl_in)])
-                    st.success(f"Add On {nl_in} tersimpan."); st.rerun()
+                                [int(new_id_a), val_an.strip(), val_ak, float(val_ah), int(val_as)])
+                    
+                    st.success(f"Add On '{val_an}' dengan stok {int(val_as)} berhasil disimpan!")
+                    st.rerun()
         
         with t_l2:
             if not df_l.empty:
