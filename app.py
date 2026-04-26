@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta, timezone
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Data Integrity", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Stable", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -123,7 +123,7 @@ def cashier_ui():
                 st.rerun()
 
 def admin_ui():
-    st.title("🏗️ Panel Admin v1.8")
+    st.title("🏗️ Panel Admin v1.8 (Stable)")
     menu = st.sidebar.selectbox("Menu", ["Dashboard", "Produk", "Add On", "Transaksi"])
     list_kategori = ["Minuman", "Makanan", "Fashion"]
 
@@ -142,15 +142,17 @@ def admin_ui():
                 h = st.number_input("Harga", min_value=0, step=500)
                 s = st.number_input("Stok Awal", min_value=0)
                 
-                # --- CHECK DUPLICATE WARNING ---
                 if n:
-                    dup_check = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(nama_produk) = LOWER(?)", [n]).fetchone()[0]
+                    # Fix: Menggunakan TRIM dan strip() untuk akurasi pengecekan duplikat
+                    n_clean = n.strip()
+                    dup_check = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [n_clean]).fetchone()[0]
                     if dup_check > 0:
-                        st.warning(f"⚠️ Perhatian: Nama '{n}' sudah ada di database!")
+                        st.warning(f"⚠️ Perhatian: Nama '{n_clean}' sudah ada di database!")
 
                 if st.form_submit_button("Simpan Produk"):
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
-                    con.execute("INSERT INTO produk VALUES (?,?,?,?,?)", [nid, n, k, h, s])
+                    # Fix: Memastikan tepat 5 kolom sesuai struktur tabel produk
+                    con.execute("INSERT INTO produk VALUES (?,?,?,?,?)", [nid, n.strip(), k, h, s])
                     st.success("Produk ditambahkan!"); st.rerun()
         
         with t2:
@@ -162,14 +164,14 @@ def admin_ui():
                     ek = st.selectbox("Kategori", list_kategori, index=list_kategori.index(curr['kategori']))
                     eh = st.number_input("Harga", value=float(curr['harga']))
                     
-                    # --- CHECK DUPLICATE WARNING (Excluding Current ID) ---
-                    if en and en.lower() != curr['nama_produk'].lower():
-                        dup_edit_check = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(nama_produk) = LOWER(?) AND id != ?", [en, int(curr['id'])]).fetchone()[0]
+                    if en and en.strip().lower() != curr['nama_produk'].lower():
+                        en_clean = en.strip()
+                        dup_edit_check = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?) AND id != ?", [en_clean, int(curr['id'])]).fetchone()[0]
                         if dup_edit_check > 0:
-                            st.warning(f"⚠️ Perhatian: Nama '{en}' sudah digunakan oleh produk lain!")
+                            st.warning(f"⚠️ Perhatian: Nama '{en_clean}' sudah digunakan oleh produk lain!")
 
                     if st.form_submit_button("Update Data"):
-                        con.execute("UPDATE produk SET nama_produk=?, kategori=?, harga=? WHERE id=?", [en, ek, eh, int(curr['id'])])
+                        con.execute("UPDATE produk SET nama_produk=?, kategori=?, harga=? WHERE id=?", [en.strip(), ek, eh, int(curr['id'])])
                         st.success("Produk diperbarui!"); st.rerun()
 
         with t3:
@@ -202,9 +204,16 @@ def admin_ui():
                 kl = st.selectbox("Kategori", list_kategori, key="a_kat")
                 hl = st.number_input("Harga Tambahan", min_value=0, step=500)
                 sl = st.number_input("Stok Awal", min_value=0)
+                
+                if nl:
+                    nl_clean = nl.strip()
+                    dup_a_check = con.execute("SELECT COUNT(*) FROM master_label WHERE LOWER(TRIM(nama_label)) = LOWER(?)", [nl_clean]).fetchone()[0]
+                    if dup_a_check > 0:
+                        st.warning(f"⚠️ Perhatian: Add On '{nl_clean}' sudah ada!")
+
                 if st.form_submit_button("Simpan Add On"):
                     new_id = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM master_label").fetchone()[0]
-                    con.execute("INSERT INTO master_label VALUES (?,?,?,?,?)", [new_id, nl, kl, hl, sl])
+                    con.execute("INSERT INTO master_label VALUES (?,?,?,?,?)", [new_id, nl.strip(), kl, hl, sl])
                     st.success("Add On ditambahkan!"); st.rerun()
         
         with t_l2:
@@ -216,7 +225,7 @@ def admin_ui():
                     new_kl = st.selectbox("Kategori", list_kategori, index=list_kategori.index(old['kategori']))
                     new_hl = st.number_input("Harga", value=float(old['harga']))
                     if st.form_submit_button("Update Add On"):
-                        con.execute("UPDATE master_label SET nama_label=?, kategori=?, harga=? WHERE id=?", [new_nl, new_kl, new_hl, a_target_id])
+                        con.execute("UPDATE master_label SET nama_label=?, kategori=?, harga=? WHERE id=?", [new_nl.strip(), new_kl, new_hl, a_target_id])
                         st.success("Add On diperbarui!"); st.rerun()
 
         with t_l3:
@@ -239,7 +248,9 @@ def admin_ui():
         res_h = con.execute("SELECT SUM(total_harga) FROM transaksi WHERE CAST(waktu AS DATE) = ?", [get_now_wib().strftime('%Y-%m-%d')]).fetchone()
         st.metric("Omset Hari Ini", f"Rp{res_h[0] if res_h[0] else 0:,.0f}")
         df_tx = con.execute("SELECT * FROM transaksi").df()
-        if not df_tx.empty: st.plotly_chart(px.bar(df_tx, x='waktu', y='total_harga', title="Laporan Penjualan"))
+        if not df_tx.empty: 
+            df_tx['waktu'] = pd.to_datetime(df_tx['waktu'])
+            st.plotly_chart(px.bar(df_tx, x='waktu', y='total_harga', title="Laporan Penjualan"))
 
     elif menu == "Transaksi":
         df_tx = con.execute("SELECT * FROM transaksi ORDER BY waktu DESC").df()
