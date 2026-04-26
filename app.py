@@ -143,43 +143,71 @@ def admin_ui():
 
         t1, t2, t3, t4 = st.tabs(["➕ Tambah", "✏️ Edit", "📦 Stok", "🗑️ Hapus"])
         
+        # --- TAB 1: TAMBAH ---
         with t1:
-            with st.form("form_add_produk_final"):
-                # Kita WAJIB pakai KEY agar session_state menyimpan nilai sebelum Enter dikirim
+            with st.form("f_add_p"):
                 st.text_input("Nama Produk", key="p_name_k")
                 st.selectbox("Kategori", list_kategori, key="p_kat_k")
                 st.number_input("Harga", min_value=0, step=500, key="p_harga_k")
                 st.number_input("Stok Awal", min_value=0, step=1, key="p_stok_k")
                 
                 if st.form_submit_button("Simpan Produk"):
-                    # Ambil nilai dari session state
-                    val_n = st.session_state.p_name_k
-                    val_k = st.session_state.p_kat_k
-                    val_h = st.session_state.p_harga_k
-                    val_s = st.session_state.p_stok_k
-
-                    if not val_n.strip(): st.error("Nama tidak boleh kosong!"); return
-                    is_dup = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [val_n.strip()]).fetchone()[0]
-                    if is_dup > 0:
-                        st.error(f"Gagal! Produk '{val_n.strip()}' sudah ada."); return
+                    v_n, v_k, v_h, v_s = st.session_state.p_name_k, st.session_state.p_kat_k, st.session_state.p_harga_k, st.session_state.p_stok_k
+                    if not v_n.strip(): st.error("Nama tidak boleh kosong!"); return
+                    is_dup = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [v_n.strip()]).fetchone()[0]
+                    if is_dup > 0: st.error(f"Gagal! Produk '{v_n.strip()}' sudah ada."); return
                     
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
-                    con.execute("""
-                        INSERT INTO produk (id, nama_produk, kategori, harga, stok) 
-                        VALUES (?, ?, ?, ?, ?)
-                    """, [int(nid), val_n.strip(), val_k, float(val_h), int(val_s)])
-                    st.success(f"Berhasil! {val_n} dengan stok {int(val_s)} tersimpan."); st.rerun()
-        
+                    con.execute("INSERT INTO produk (id, nama_produk, kategori, harga, stok) VALUES (?,?,?,?,?)", [int(nid), v_n.strip(), v_k, float(v_h), int(v_s)])
+                    st.success(f"Berhasil simpan {v_n}!"); st.rerun()
+
+        # --- TAB 2: EDIT (IMPLEMENTASI BARU) ---
+        with t2:
+            if not df_p.empty:
+                p_edit_id = st.selectbox("Pilih Produk yang akan di-Edit", df_p['id'].tolist(), 
+                                        format_func=lambda x: f"{df_p[df_p['id']==x]['nama_produk'].values[0]}",
+                                        key="p_edit_sel_id")
+                
+                # Ambil data lama untuk default value
+                old_data = df_p[df_p['id'] == p_edit_id].iloc[0]
+                
+                with st.form("f_edit_p_form"):
+                    e_nama = st.text_input("Nama Produk", value=old_data['nama_produk'])
+                    e_kat = st.selectbox("Kategori", list_kategori, index=list_kategori.index(old_data['kategori']))
+                    e_harga = st.number_input("Harga", min_value=0, value=float(old_data['harga']), step=500)
+                    
+                    if st.form_submit_button("Update Data Produk"):
+                        con.execute("""
+                            UPDATE produk SET nama_produk = ?, kategori = ?, harga = ? WHERE id = ?
+                        """, [e_nama.strip(), e_kat, float(e_harga), int(p_edit_id)])
+                        st.success("Produk berhasil diperbarui!"); st.rerun()
+            else:
+                st.info("Belum ada produk untuk diedit.")
+
+        # --- TAB 3: STOK ---
         with t3:
             if not df_p.empty:
-                p_stok_id = st.selectbox("Pilih Produk (Stok)", df_p['id'].tolist(), format_func=lambda x: f"{df_p[df_p['id']==x]['nama_produk'].values[0]}")
+                p_stok_id = st.selectbox("Pilih Produk (Update Stok)", df_p['id'].tolist(), 
+                                        format_func=lambda x: f"{df_p[df_p['id']==x]['nama_produk'].values[0]}", 
+                                        key="p_stok_sel_id")
                 curr_s = df_p[df_p['id'] == p_stok_id]['stok'].values[0]
                 with st.form("f_upd_stok_p"):
-                    st.number_input("Set Stok Baru", min_value=0, value=int(curr_s), step=1, key="p_stok_new_k")
+                    st.number_input("Set Stok Baru", min_value=0, value=int(curr_s), step=1, key="p_stok_upd_k")
                     if st.form_submit_button("Update Stok"):
-                        val_new_s = st.session_state.p_stok_new_k
-                        con.execute("UPDATE produk SET stok=? WHERE id=?", [int(val_new_s), int(p_stok_id)])
+                        con.execute("UPDATE produk SET stok=? WHERE id=?", [int(st.session_state.p_stok_upd_k), int(p_stok_id)])
                         st.success("Stok diperbarui!"); st.rerun()
+
+        # --- TAB 4: HAPUS ---
+        with t4:
+            if not df_p.empty:
+                p_del_id = st.selectbox("Pilih Produk yang akan Dihapus", df_p['id'].tolist(), 
+                                        format_func=lambda x: f"{df_p[df_p['id']==x]['nama_produk'].values[0]}",
+                                        key="p_del_sel_id")
+                if st.button("🔥 Hapus Produk Permanen", key="btn_del_p"):
+                    con.execute("DELETE FROM produk WHERE id=?", [int(p_del_id)])
+                    st.success("Produk berhasil dihapus!"); st.rerun()
+            else:
+                st.info("Belum ada produk untuk dihapus.")
 
     # --- 2. MENU ADD ON ---
     elif menu == "Add On":
