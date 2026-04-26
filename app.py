@@ -5,9 +5,9 @@ import plotly.express as px
 from datetime import datetime, timedelta, timezone
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v1.2", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v1.3", layout="wide")
 
-# --- 2. KONEKSI & INISIALISASI DATABASE ---
+# --- 2. KONEKSI DATABASE ---
 @st.cache_resource
 def get_connection():
     try:
@@ -15,17 +15,8 @@ def get_connection():
             st.error("Missing MOTHERDUCK_TOKEN in secrets!")
             st.stop()
         TOKEN = st.secrets["MOTHERDUCK_TOKEN"]
-        con = duckdb.connect(f"md:tes_db?motherduck_token={TOKEN}")
-        
-        # Inisialisasi tabel master_label
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS master_label (
-                id INTEGER PRIMARY KEY,
-                nama_label VARCHAR,
-                kategori VARCHAR
-            )
-        """)
-        return con
+        # Langsung konek ke MotherDuck (Tabel diasumsikan sudah ada)
+        return duckdb.connect(f"md:tes_db?motherduck_token={TOKEN}")
     except Exception as e:
         st.error(f"Gagal koneksi ke MotherDuck: {e}")
         st.stop()
@@ -78,14 +69,12 @@ def cashier_ui():
             if not df_filtered.empty:
                 item_p_name = st.selectbox("Pilih Produk", sorted(df_filtered['nama_produk'].unique()))
                 
-                # Identifikasi Kategori Produk untuk filter Label
                 selected_item_data = df_filtered[df_filtered['nama_produk'] == item_p_name].iloc[0]
                 p_category = selected_item_data['kategori']
                 p_id = selected_item_data['id']
                 p_harga = selected_item_data['harga']
                 p_stok = selected_item_data['stok']
                 
-                # FILTER LABEL OTOMATIS: Ambil dari master_label berdasarkan kategori produk
                 df_labels = con.execute("SELECT nama_label FROM master_label WHERE kategori = ?", [p_category]).df()
                 available_labels = sorted(df_labels['nama_label'].tolist()) if not df_labels.empty else []
                 
@@ -95,11 +84,8 @@ def cashier_ui():
                 if st.form_submit_button("➕ Tambah"):
                     if p_stok >= qty_p:
                         st.session_state.cart.append({
-                            "id": int(p_id), 
-                            "nama": item_p_name, 
-                            "qty": int(qty_p),
-                            "harga": float(p_harga), 
-                            "subtotal": float(p_harga * qty_p),
+                            "id": int(p_id), "nama": item_p_name, "qty": int(qty_p),
+                            "harga": float(p_harga), "subtotal": float(p_harga * qty_p),
                             "opsi": ", ".join(p_user_selection)
                         })
                         st.rerun()
@@ -124,17 +110,15 @@ def cashier_ui():
                 st.rerun()
 
 def admin_ui():
-    st.title("🏗️ Panel Admin v1.2")
+    st.title("🏗️ Panel Admin v1.3")
     menu = st.sidebar.selectbox("Menu", ["Dashboard", "Produk", "Kelola Label", "Transaksi"])
     
-    # --- TABEL MASTER LABEL ---
     if menu == "Kelola Label":
-        st.subheader("🏷️ Master Label (Pemisah Kategori)")
+        st.subheader("🏷️ Master Label")
         df_l = con.execute("SELECT * FROM master_label ORDER BY kategori, nama_label").df()
         st.dataframe(df_l, use_container_width=True, hide_index=True)
 
-        t_l1, t_l2, t_l3 = st.tabs(["➕ Tambah Label Baru", "✏️ Edit Label", "🗑️ Hapus"])
-        
+        t_l1, t_l2, t_l3 = st.tabs(["➕ Tambah", "✏️ Edit", "🗑️ Hapus"])
         with t_l1:
             with st.form("add_label"):
                 nl = st.text_input("Nama Label")
@@ -157,12 +141,11 @@ def admin_ui():
 
         with t_l3:
             if not df_l.empty:
-                del_l_id = st.selectbox("Pilih Label yang akan dihapus", df_l['id'].tolist())
+                del_l_id = st.selectbox("Pilih ID Label Hapus", df_l['id'].tolist())
                 if st.button("🔥 Hapus"):
                     con.execute("DELETE FROM master_label WHERE id=?", [del_l_id])
                     st.rerun()
 
-    # --- TABEL PRODUK (LABEL MULTISELECT DIHAPUS) ---
     elif menu == "Produk":
         st.subheader("📦 Daftar Produk")
         df_p = con.execute("SELECT id, nama_produk, kategori, harga, stok FROM produk ORDER BY id DESC").df()
@@ -176,41 +159,41 @@ def admin_ui():
                 k = st.selectbox("Kategori", ["Minuman", "Makanan", "Snack"])
                 h = st.number_input("Harga", min_value=0, step=500)
                 s = st.number_input("Stok Awal", min_value=0)
-                # INPUT OPSI/LABEL TELAH DIHAPUS DISINI
                 if st.form_submit_button("Simpan Produk"):
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
-                    # Opsi diisi string kosong secara default
                     con.execute("INSERT INTO produk VALUES (?,?,?,?,?,?)", [nid, n, k, h, s, ""])
-                    st.success(f"{n} berhasil disimpan.")
                     st.rerun()
         
         with t2:
             if not df_p.empty:
-                eid = st.selectbox("Pilih ID Produk untuk Edit", df_p['id'].tolist())
-                curr = df_p[df_p['id'] == eid].iloc[0]
+                target_p_name = st.selectbox("Pilih Nama Produk (Edit)", df_p['nama_produk'].tolist())
+                curr = df_p[df_p['nama_produk'] == target_p_name].iloc[0]
                 with st.form("f_edit"):
-                    en = st.text_input("Nama", value=curr['nama_produk'])
+                    en = st.text_input("Nama Baru", value=curr['nama_produk'])
                     ek = st.selectbox("Kategori", ["Minuman", "Makanan", "Snack"], index=["Minuman", "Makanan", "Snack"].index(curr['kategori']))
                     eh = st.number_input("Harga", value=float(curr['harga']))
-                    # INPUT OPSI/LABEL TELAH DIHAPUS DISINI
-                    if st.form_submit_button("Update Produk"):
-                        con.execute("UPDATE produk SET nama_produk=?, kategori=?, harga=? WHERE id=?", [en, ek, eh, eid])
-                        st.success("Data diperbarui.")
+                    if st.form_submit_button("Update Data"):
+                        con.execute("UPDATE produk SET nama_produk=?, kategori=?, harga=? WHERE id=?", [en, ek, eh, int(curr['id'])])
                         st.rerun()
 
+        # --- UPDATE STOK BERDASARKAN NAMA ---
         with t3:
             if not df_p.empty:
-                stok_id = st.selectbox("ID Produk (Stok)", df_p['id'].tolist())
-                ns = st.number_input("Stok Baru", min_value=0)
-                if st.button("Simpan Stok"):
-                    con.execute("UPDATE produk SET stok=? WHERE id=?", [ns, stok_id])
+                nama_stok = st.selectbox("Pilih Nama Produk untuk Update Stok", sorted(df_p['nama_produk'].tolist()))
+                curr_s = df_p[df_p['nama_produk'] == nama_stok]['stok'].values[0]
+                st.info(f"Stok saat ini untuk **{nama_stok}**: {curr_s}")
+                
+                ns = st.number_input("Set Stok Baru", min_value=0, value=int(curr_s))
+                if st.button("Simpan Perubahan Stok"):
+                    con.execute("UPDATE produk SET stok=? WHERE nama_produk=?", [ns, nama_stok])
+                    st.success(f"Stok {nama_stok} diperbarui menjadi {ns}")
                     st.rerun()
         
         with t4:
             if not df_p.empty:
-                did = st.selectbox("ID Produk Hapus", df_p['id'].tolist())
-                if st.button("🔥 Hapus Produk"):
-                    con.execute("DELETE FROM produk WHERE id=?", [did])
+                del_name = st.selectbox("Nama Produk untuk Hapus", df_p['nama_produk'].tolist())
+                if st.button("🔥 Hapus Permanen"):
+                    con.execute("DELETE FROM produk WHERE nama_produk=?", [del_name])
                     st.rerun()
 
     elif menu == "Dashboard":
@@ -218,7 +201,7 @@ def admin_ui():
         st.metric("Omset Hari Ini", f"Rp{res_h[0] if res_h[0] else 0:,.0f}")
         df_tx = con.execute("SELECT * FROM transaksi").df()
         if not df_tx.empty:
-            st.plotly_chart(px.bar(df_tx, x='waktu', y='total_harga', title="Laporan Penjualan"))
+            st.plotly_chart(px.bar(df_tx, x='waktu', y='total_harga', title="Penjualan"))
 
     elif menu == "Transaksi":
         df_tx = con.execute("SELECT * FROM transaksi ORDER BY waktu DESC").df()
