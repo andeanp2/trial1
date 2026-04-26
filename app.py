@@ -137,27 +137,28 @@ def admin_ui():
         
         with t1:
             with st.form("f_add_p", clear_on_submit=True):
-                n = st.text_input("Nama Produk")
+                n = st.text_input("Nama Produk", key="inp_n_prod")
                 k = st.selectbox("Kategori", list_kategori, key="p_kat")
                 h = st.number_input("Harga", min_value=0, step=500)
                 s = st.number_input("Stok Awal", min_value=0)
                 
-                if n:
+                # Hanya cek jika n benar-benar diisi (bukan spasi)
+                if n.strip():
                     n_clean = n.strip()
                     if not df_p.empty and n_clean.lower() in df_p['nama_produk'].str.lower().str.strip().values:
                         st.warning(f"⚠️ Nama '{n_clean}' sudah ada di database!")
 
                 if st.form_submit_button("Simpan Produk"):
-                    if not n: st.error("Nama tidak boleh kosong!"); return
+                    if not n.strip(): st.error("Nama tidak boleh kosong!"); return
                     is_dup = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [n.strip()]).fetchone()[0]
                     if is_dup > 0:
-                        st.error(f"Gagal! '{n}' sudah terdaftar."); return
+                        st.error(f"Gagal! '{n}' sudah ada."); return
                     
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
-                    con.execute("INSERT INTO produk (id, nama_produk, kategori, harga, stok) VALUES (?, ?, ?, ?, ?)", 
-                                [nid, n.strip(), k, h, s])
+                    con.execute("INSERT INTO produk (id, nama_produk, kategori, harga, stok) VALUES (?,?,?,?,?)", [nid, n.strip(), k, h, s])
                     st.success("Produk ditambahkan!"); st.rerun()
         
+        # ... (Logika Edit, Stok, Hapus Produk tetap sama)
         with t2:
             if not df_p.empty:
                 p_target = st.selectbox("Pilih Produk (Edit)", df_p['nama_produk'].tolist())
@@ -196,24 +197,25 @@ def admin_ui():
         
         with t_l1:
             with st.form("f_add_a", clear_on_submit=True):
-                nl = st.text_input("Nama Add On")
+                # Tambahkan KEY unik agar state tidak tertukar/nyangkut
+                nl = st.text_input("Nama Add On", key="inp_nl_addon")
                 kl = st.selectbox("Kategori", list_kategori, key="a_kat")
                 hl = st.number_input("Harga Tambahan", min_value=0, step=500)
                 sl = st.number_input("Stok Awal", min_value=0)
                 
-                # --- PROTEKSI DUPLIKASI (VISUAL) ---
-                if nl:
+                # Hanya cek duplikat jika user benar-benar mengetik (bukan field kosong)
+                if nl.strip():
                     nl_clean = nl.strip()
+                    # Cek terhadap dataframe yang ditarik di awal fungsi admin_ui
                     if not df_l.empty and nl_clean.lower() in df_l['nama_label'].str.lower().str.strip().values:
                         st.warning(f"⚠️ Add On '{nl_clean}' sudah ada di database!")
 
                 if st.form_submit_button("Simpan Add On"):
-                    if not nl: st.error("Nama Add On tidak boleh kosong!"); return
+                    if not nl.strip(): st.error("Nama tidak boleh kosong!"); return
                     
-                    # --- PROTEKSI DUPLIKASI (HARD CHECK DATABASE) ---
                     is_dup_a = con.execute("SELECT COUNT(*) FROM master_label WHERE LOWER(TRIM(nama_label)) = LOWER(?)", [nl.strip()]).fetchone()[0]
                     if is_dup_a > 0:
-                        st.error(f"Gagal! Add On '{nl}' sudah terdaftar."); return
+                        st.error(f"Gagal! Add On '{nl}' sudah ada."); return
                     
                     new_id = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM master_label").fetchone()[0]
                     con.execute("INSERT INTO master_label (id, nama_label, kategori, harga, stok) VALUES (?,?,?,?,?)", 
