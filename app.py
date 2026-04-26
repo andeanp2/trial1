@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta, timezone
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Fixed", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Stable Integrity", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -149,6 +149,10 @@ def admin_ui():
 
                 if st.form_submit_button("Simpan Produk"):
                     if not n: st.error("Nama tidak boleh kosong!"); return
+                    is_dup = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [n.strip()]).fetchone()[0]
+                    if is_dup > 0:
+                        st.error(f"Gagal! '{n}' sudah terdaftar."); return
+                    
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
                     con.execute("INSERT INTO produk (id, nama_produk, kategori, harga, stok) VALUES (?, ?, ?, ?, ?)", 
                                 [nid, n.strip(), k, h, s])
@@ -196,7 +200,21 @@ def admin_ui():
                 kl = st.selectbox("Kategori", list_kategori, key="a_kat")
                 hl = st.number_input("Harga Tambahan", min_value=0, step=500)
                 sl = st.number_input("Stok Awal", min_value=0)
+                
+                # --- PROTEKSI DUPLIKASI (VISUAL) ---
+                if nl:
+                    nl_clean = nl.strip()
+                    if not df_l.empty and nl_clean.lower() in df_l['nama_label'].str.lower().str.strip().values:
+                        st.warning(f"⚠️ Add On '{nl_clean}' sudah ada di database!")
+
                 if st.form_submit_button("Simpan Add On"):
+                    if not nl: st.error("Nama Add On tidak boleh kosong!"); return
+                    
+                    # --- PROTEKSI DUPLIKASI (HARD CHECK DATABASE) ---
+                    is_dup_a = con.execute("SELECT COUNT(*) FROM master_label WHERE LOWER(TRIM(nama_label)) = LOWER(?)", [nl.strip()]).fetchone()[0]
+                    if is_dup_a > 0:
+                        st.error(f"Gagal! Add On '{nl}' sudah terdaftar."); return
+                    
                     new_id = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM master_label").fetchone()[0]
                     con.execute("INSERT INTO master_label (id, nama_label, kategori, harga, stok) VALUES (?,?,?,?,?)", 
                                 [new_id, nl.strip(), kl, hl, sl])
@@ -206,7 +224,7 @@ def admin_ui():
             if not df_l.empty:
                 a_target_id = st.selectbox("Pilih Add On (Edit)", df_l['id'].tolist(), format_func=lambda x: f"{df_l[df_l['id']==x]['nama_label'].values[0]}")
                 old = df_l[df_l['id'] == a_target_id].iloc[0]
-                with st.form("f_edit_a"): # Form ditambahkan di sini untuk memperbaiki error
+                with st.form("f_edit_a"):
                     new_nl = st.text_input("Nama Add On", value=old['nama_label'])
                     new_kl = st.selectbox("Kategori", list_kategori, index=list_kategori.index(old['kategori']))
                     new_hl = st.number_input("Harga", value=float(old['harga']))
