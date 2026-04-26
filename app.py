@@ -5,12 +5,12 @@ import plotly.express as px
 from datetime import datetime, timedelta, timezone
 
 # =================================================================
-# VERSI: 1.8 - FINAL STABLE BASELINE (ULTIMATE FIX)
-# FITUR: Fix Bug Stok 0 pada Tambah Produk & Add On
+# VERSI: 1.8 - FINAL STABLE BASELINE (REPAIRED DATA CAPTURE)
+# FITUR: Fix Bug Nilai 0 pada Produk & Add On (Direct Capture)
 # =================================================================
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Stable", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Final", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -86,25 +86,25 @@ def cashier_ui():
                         addon_data_map[label_display] = {"nama": row['nama_label'], "harga": float(row['harga']), "stok": int(row['stok'])}
                 
                 selected_addons_display = st.multiselect(f"Pilih Add On ({p_category}):", addon_options)
-                qty_p = st.number_input("Jumlah", min_value=1, step=1, key="qty_c")
+                qty_p_in = st.number_input("Jumlah", min_value=1, step=1)
 
                 if st.form_submit_button("➕ Tambah"):
-                    if p_stok_prod < qty_p:
+                    if p_stok_prod < qty_p_in:
                         st.error(f"Stok Produk '{item_p_name}' sisa {p_stok_prod}!"); return
                     
                     total_addon_price = 0
                     clean_addons_list = []
                     for ad_disp in selected_addons_display:
                         ad_info = addon_data_map[ad_disp]
-                        if ad_info['stok'] < qty_p:
+                        if ad_info['stok'] < qty_p_in:
                             st.error(f"Stok Add On '{ad_info['nama']}' tidak cukup!"); return
                         total_addon_price += ad_info['harga']
                         clean_addons_list.append(ad_info['nama'])
 
                     st.session_state.cart.append({
-                        "id": int(p_id), "nama": item_p_name, "qty": int(qty_p),
+                        "id": int(p_id), "nama": item_p_name, "qty": int(qty_p_in),
                         "harga_satuan": p_harga_base + total_addon_price, 
-                        "subtotal": (p_harga_base + total_addon_price) * qty_p,
+                        "subtotal": (p_harga_base + total_addon_price) * qty_p_in,
                         "opsi_list": clean_addons_list, "opsi_txt": ", ".join(clean_addons_list)
                     })
                     st.rerun()
@@ -143,38 +143,30 @@ def admin_ui():
         t1, t2, t3, t4 = st.tabs(["➕ Tambah", "✏️ Edit", "📦 Stok", "🗑️ Hapus"])
         
         with t1:
-            # FIX: Hapus clear_on_submit untuk menjamin data terbaca
-            with st.form("form_tambah_produk"):
-                st.text_input("Nama Produk", key="new_p_nama")
-                st.selectbox("Kategori", list_kategori, key="new_p_kat")
-                st.number_input("Harga", min_value=0, step=500, key="new_p_harga")
-                st.number_input("Stok Awal", min_value=0, step=1, key="new_p_stok")
+            with st.form("f_tambah_produk_final"):
+                # Menangkap input langsung ke variabel
+                n_val = st.text_input("Nama Produk")
+                k_val = st.selectbox("Kategori", list_kategori)
+                h_val = st.number_input("Harga", min_value=0, step=500)
+                s_val = st.number_input("Stok Awal", min_value=0, step=1)
                 
                 if st.form_submit_button("Simpan Produk"):
-                    # Ambil nilai langsung dari session_state
-                    val_n = st.session_state.new_p_nama
-                    val_k = st.session_state.new_p_kat
-                    val_h = st.session_state.new_p_harga
-                    val_s = st.session_state.new_p_stok
-
-                    if not val_n.strip(): 
+                    if not n_val.strip(): 
                         st.error("Nama tidak boleh kosong!"); return
                     
-                    is_dup = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [val_n.strip()]).fetchone()[0]
+                    is_dup = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [n_val.strip()]).fetchone()[0]
                     if is_dup > 0:
-                        st.error(f"Gagal! Produk '{val_n.strip()}' sudah ada."); return
+                        st.error(f"Gagal! Produk '{n_val.strip()}' sudah ada."); return
                     
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
                     
-                    # LOGGING UNTUK DEBUG (Akan muncul di layar sebentar)
-                    # st.write(f"DEBUG: Menyimpan ID {nid}, Nama {val_n}, Stok {val_s}") 
-
+                    # Eksekusi dengan variabel langsung (bukan session_state)
                     con.execute("""
                         INSERT INTO produk (id, nama_produk, kategori, harga, stok) 
                         VALUES (?, ?, ?, ?, ?)
-                    """, [int(nid), val_n.strip(), val_k, float(val_h), int(val_s)])
+                    """, [int(nid), n_val.strip(), k_val, float(h_val), int(s_val)])
                     
-                    st.success(f"Produk '{val_n}' dengan stok {int(val_s)} berhasil disimpan!")
+                    st.success(f"Berhasil! Produk '{n_val}' disimpan dengan stok {int(s_val)}.")
                     st.rerun()
         
         with t2:
@@ -182,16 +174,16 @@ def admin_ui():
                 p_target_id = st.selectbox("Pilih Produk (Edit)", df_p['id'].tolist(), format_func=lambda x: df_p[df_p['id']==x]['nama_produk'].values[0])
                 curr = df_p[df_p['id'] == p_target_id].iloc[0]
                 with st.form("f_edit_p"):
-                    en = st.text_input("Nama Baru", value=curr['nama_produk'])
-                    ek = st.selectbox("Kategori", list_kategori, index=list_kategori.index(curr['kategori']))
-                    eh = st.number_input("Harga", value=float(curr['harga']))
+                    en_val = st.text_input("Nama Baru", value=curr['nama_produk'])
+                    ek_val = st.selectbox("Kategori", list_kategori, index=list_kategori.index(curr['kategori']))
+                    eh_val = st.number_input("Harga", value=float(curr['harga']))
                     if st.form_submit_button("Update Data"):
-                        con.execute("UPDATE produk SET nama_produk=?, kategori=?, harga=? WHERE id=?", [en.strip(), ek, float(eh), int(p_target_id)])
+                        con.execute("UPDATE produk SET nama_produk=?, kategori=?, harga=? WHERE id=?", [en_val.strip(), ek_val, float(eh_val), int(p_target_id)])
                         st.success("Produk diperbarui!"); st.rerun()
 
         with t3:
             if not df_p.empty:
-                p_stok_id = st.selectbox("Pilih Produk (Stok)", df_p['id'].tolist(), format_func=lambda x: f"{df_p[df_p['id']==x]['nama_produk'].values[0]}")
+                p_stok_id = st.selectbox("Pilih Produk (Update Stok)", df_p['id'].tolist(), format_func=lambda x: f"{df_p[df_p['id']==x]['nama_produk'].values[0]}")
                 curr_s = df_p[df_p['id'] == p_stok_id]['stok'].values[0]
                 with st.form("f_upd_stok_p"):
                     ns_in = st.number_input("Set Stok Baru", min_value=0, value=int(curr_s), step=1)
@@ -215,30 +207,25 @@ def admin_ui():
         t_l1, t_l2, t_l3, t_l4 = st.tabs(["➕ Tambah", "✏️ Edit", "📦 Stok", "🗑️ Hapus"])
         
         with t_l1:
-            with st.form("form_tambah_addon"):
-                st.text_input("Nama Add On", key="new_a_nama")
-                st.selectbox("Kategori", list_kategori, key="new_a_kat")
-                st.number_input("Harga Tambahan", min_value=0, step=500, key="new_a_harga")
-                st.number_input("Stok Awal", min_value=0, step=1, key="new_a_stok")
+            with st.form("f_tambah_addon_final"):
+                an_val = st.text_input("Nama Add On")
+                ak_val = st.selectbox("Kategori", list_kategori)
+                ah_val = st.number_input("Harga Tambahan", min_value=0, step=500)
+                as_val = st.number_input("Stok Awal", min_value=0, step=1)
                 
                 if st.form_submit_button("Simpan Add On"):
-                    val_an = st.session_state.new_a_nama
-                    val_ak = st.session_state.new_a_kat
-                    val_ah = st.session_state.new_a_harga
-                    val_as = st.session_state.new_a_stok
-
-                    if not val_an.strip(): 
+                    if not an_val.strip(): 
                         st.error("Nama Add On tidak boleh kosong!"); return
                     
-                    is_dup_a = con.execute("SELECT COUNT(*) FROM master_label WHERE LOWER(TRIM(nama_label)) = LOWER(?)", [val_an.strip()]).fetchone()[0]
+                    is_dup_a = con.execute("SELECT COUNT(*) FROM master_label WHERE LOWER(TRIM(nama_label)) = LOWER(?)", [an_val.strip()]).fetchone()[0]
                     if is_dup_a > 0:
-                        st.error(f"Gagal! Add On '{val_an.strip()}' sudah ada."); return
+                        st.error(f"Gagal! Add On '{an_val.strip()}' sudah ada."); return
                     
                     new_id_a = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM master_label").fetchone()[0]
                     con.execute("INSERT INTO master_label (id, nama_label, kategori, harga, stok) VALUES (?,?,?,?,?)", 
-                                [int(new_id_a), val_an.strip(), val_ak, float(val_ah), int(val_as)])
+                                [int(new_id_a), an_val.strip(), ak_val, float(ah_val), int(as_val)])
                     
-                    st.success(f"Add On '{val_an}' dengan stok {int(val_as)} berhasil disimpan!")
+                    st.success(f"Add On '{an_val}' dengan stok {int(as_val)} berhasil disimpan!")
                     st.rerun()
         
         with t_l2:
@@ -255,11 +242,11 @@ def admin_ui():
 
         with t_l3:
             if not df_l.empty:
-                a_stok_id = st.selectbox("Pilih Add On (Stok)", df_l['id'].tolist(), format_func=lambda x: f"{df_l[df_l['id']==x]['nama_label'].values[0]}")
+                a_stok_id = st.selectbox("Pilih Add On (Update Stok)", df_l['id'].tolist(), format_func=lambda x: f"{df_l[df_l['id']==x]['nama_label'].values[0]}")
                 curr_sl = df_l[df_l['id'] == a_stok_id]['stok'].values[0]
                 with st.form("f_upd_stok_a"):
                     nsl_in = st.number_input("Set Stok Baru", min_value=0, value=int(curr_sl), step=1)
-                    if st.form_submit_button("Update Stok Add On"):
+                    if st.form_submit_button("Update Stok"):
                         con.execute("UPDATE master_label SET stok=? WHERE id=?", [int(nsl_in), int(a_stok_id)])
                         st.success("Stok diperbarui!"); st.rerun()
 
