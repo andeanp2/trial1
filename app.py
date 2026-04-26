@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta, timezone
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v1.7 - Final Correction", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Data Integrity", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -52,8 +52,7 @@ def cashier_ui():
     try:
         df_produk = con.execute("SELECT * FROM produk").df()
     except:
-        st.warning("Tabel produk belum siap di database.")
-        return
+        st.warning("Tabel produk belum siap di database."); return
 
     col_input, col_cart = st.columns([1, 2])
 
@@ -66,7 +65,6 @@ def cashier_ui():
         with st.form("form_cart", clear_on_submit=True):
             if not df_filtered.empty:
                 item_p_name = st.selectbox("Pilih Produk", sorted(df_filtered['nama_produk'].unique()))
-                
                 selected_item_data = df_filtered[df_filtered['nama_produk'] == item_p_name].iloc[0]
                 p_category = selected_item_data['kategori']
                 p_id = selected_item_data['id']
@@ -74,7 +72,6 @@ def cashier_ui():
                 p_stok_prod = selected_item_data['stok']
                 
                 df_addons = con.execute("SELECT nama_label, harga, stok FROM master_label WHERE kategori = ?", [p_category]).df()
-                
                 addon_options = []
                 addon_data_map = {}
                 if not df_addons.empty:
@@ -89,7 +86,7 @@ def cashier_ui():
                 if st.form_submit_button("➕ Tambah"):
                     if p_stok_prod < qty_p:
                         st.error(f"Stok Produk '{item_p_name}' sisa {p_stok_prod}!"); return
-
+                    
                     total_addon_price = 0
                     clean_addons_list = []
                     for ad_disp in selected_addons_display:
@@ -126,7 +123,7 @@ def cashier_ui():
                 st.rerun()
 
 def admin_ui():
-    st.title("🏗️ Panel Admin v1.7")
+    st.title("🏗️ Panel Admin v1.8")
     menu = st.sidebar.selectbox("Menu", ["Dashboard", "Produk", "Add On", "Transaksi"])
     list_kategori = ["Minuman", "Makanan", "Fashion"]
 
@@ -144,6 +141,13 @@ def admin_ui():
                 k = st.selectbox("Kategori", list_kategori, key="p_kat")
                 h = st.number_input("Harga", min_value=0, step=500)
                 s = st.number_input("Stok Awal", min_value=0)
+                
+                # --- CHECK DUPLICATE WARNING ---
+                if n:
+                    dup_check = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(nama_produk) = LOWER(?)", [n]).fetchone()[0]
+                    if dup_check > 0:
+                        st.warning(f"⚠️ Perhatian: Nama '{n}' sudah ada di database!")
+
                 if st.form_submit_button("Simpan Produk"):
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
                     con.execute("INSERT INTO produk VALUES (?,?,?,?,?,?)", [nid, n, k, h, s, ""])
@@ -157,6 +161,13 @@ def admin_ui():
                     en = st.text_input("Nama Baru", value=curr['nama_produk'])
                     ek = st.selectbox("Kategori", list_kategori, index=list_kategori.index(curr['kategori']))
                     eh = st.number_input("Harga", value=float(curr['harga']))
+                    
+                    # --- CHECK DUPLICATE WARNING (Excluding Current ID) ---
+                    if en and en.lower() != curr['nama_produk'].lower():
+                        dup_edit_check = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(nama_produk) = LOWER(?) AND id != ?", [en, int(curr['id'])]).fetchone()[0]
+                        if dup_edit_check > 0:
+                            st.warning(f"⚠️ Perhatian: Nama '{en}' sudah digunakan oleh produk lain!")
+
                     if st.form_submit_button("Update Data"):
                         con.execute("UPDATE produk SET nama_produk=?, kategori=?, harga=? WHERE id=?", [en, ek, eh, int(curr['id'])])
                         st.success("Produk diperbarui!"); st.rerun()
