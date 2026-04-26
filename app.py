@@ -107,7 +107,7 @@ def admin_ui():
         with st.expander("➕ Tambah Label Baru"):
             with st.form("add_label"):
                 nl = st.text_input("Nama Label (Contoh: Dingin, Cup Besar)")
-                kl = st.selectbox("Berlaku Untuk Kategori", ["Minuman", "Makanan", "Snack"])
+                kl = st.selectbox("Berlaku Untuk Kategori", ["Minuman", "Makanan", "Fashion"])
                 hl = st.number_input("Harga Tambahan (Isi 0 jika gratis)", min_value=0, step=500)
                 if st.form_submit_button("Simpan Label"):
                     new_id = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM labels").fetchone()[0]
