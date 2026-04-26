@@ -112,62 +112,73 @@ def cashier_ui():
                     st.rerun()
 
     with col_cart:
-        if st.session_state.cart:
-            st.subheader("🛒 Keranjang")
+        # Inisialisasi memori untuk keranjang terakhir jika belum ada
+        if "last_cart" not in st.session_state:
+            st.session_state.last_cart = None
+
+        # --- SKENARIO 1: JIKA TRANSAKSI BARU SAJA BERHASIL ---
+        if st.session_state.last_cart and not st.session_state.cart:
+            st.success("✅ Transaksi Berhasil Disimpan!")
+            st.subheader("📋 Rincian Transaksi Terakhir")
             
-            # 1. Menyiapkan data untuk ditampilkan
+            df_last = pd.DataFrame(st.session_state.last_cart)
+            st.dataframe(
+                df_last[['nama', 'opsi_txt', 'qty', 'subtotal']],
+                column_config={
+                    "nama": "Produk",
+                    "opsi_txt": "Detail Add-On",
+                    "subtotal": st.column_config.NumberColumn("Subtotal", format="Rp %d")
+                },
+                width="stretch", # Update sesuai log: pengganti use_container_width=True
+                hide_index=True
+            )
+            total_last = sum(i['subtotal'] for i in st.session_state.last_cart)
+            st.write(f"**Total Terbayar: Rp{total_last:,.0f}**")
+            
+            if st.button("🛒 Buat Transaksi Baru", type="secondary", width="stretch"):
+                st.session_state.last_cart = None
+                st.rerun()
+
+        # --- SKENARIO 2: JIKA KERANJANG SEDANG TERISI (PROSES BELANJA) ---
+        elif st.session_state.cart:
+            st.subheader("🛒 Keranjang Aktif")
             df_cart = pd.DataFrame(st.session_state.cart)
             
-            # 2. Menampilkan tabel dengan format mata uang yang rapi
             st.dataframe(
                 df_cart[['nama', 'opsi_txt', 'qty', 'subtotal']],
                 column_config={
                     "nama": "Produk",
                     "opsi_txt": "Detail Add-On",
-                    "qty": "Qty",
-                    "subtotal": st.column_config.NumberColumn(
-                        "Subtotal",
-                        format="Rp %d" # Menghilangkan desimal .0000
-                    )
+                    "subtotal": st.column_config.NumberColumn("Subtotal", format="Rp %d")
                 },
-                use_container_width=True,
+                width="stretch", # Update sesuai log
                 hide_index=True
             )
 
-            # 3. Menghitung dan menampilkan total
             total = sum(i['subtotal'] for i in st.session_state.cart)
             st.write(f"### TOTAL BAYAR: Rp{total:,.0f}")
 
-            # 4. Tombol Selesaikan Transaksi
-            if st.button("✅ SELESAIKAN", type="primary", use_container_width=True):
+            if st.button("✅ SELESAIKAN", type="primary", width="stretch"):
                 id_tx = get_now_wib().strftime("%Y%m%d%H%M%S")
                 
+                # Simpan ke database
                 for b in st.session_state.cart:
-                    # Update Stok Produk
                     con.execute("UPDATE produk SET stok = stok - ? WHERE id = ?", [int(b['qty']), int(b['id'])])
-                    
-                    # Update Stok Add-On (jika ada)
                     for addon_name in b['opsi_list']:
                         con.execute("UPDATE master_label SET stok = stok - ? WHERE nama_label = ?", [int(b['qty']), addon_name])
                     
-                    # Simpan ke Tabel Transaksi
                     con.execute("""
                         INSERT INTO transaksi (id_transaksi, nama_produk, qty, total_harga, kasir, waktu, opsi_detail) 
                         VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, [
-                        id_tx, 
-                        b['nama'], 
-                        int(b['qty']), 
-                        float(b['subtotal']), 
-                        st.session_state.username, 
-                        get_now_wib().replace(tzinfo=None), 
-                        b['opsi_txt']
-                    ])
+                    """, [id_tx, b['nama'], int(b['qty']), float(b['subtotal']), st.session_state.username, get_now_wib().replace(tzinfo=None), b['opsi_txt']])
                 
-                # Reset Keranjang & Refresh Halaman
+                # PINDAHKAN ke last_cart sebelum dihapus
+                st.session_state.last_cart = st.session_state.cart.copy()
                 st.session_state.cart = []
-                st.success("Transaksi Berhasil Disimpan!")
                 st.rerun()
+        
+        else:
+            st.info("Keranjang kosong. Silakan pilih produk.")
 
 def admin_ui():
     st.title("🏗️ Panel Admin v1.8 (Updated)")
