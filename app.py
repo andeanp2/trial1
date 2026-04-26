@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta, timezone
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Stable Final", layout="wide")
+st.set_page_config(page_title="Sistem Kasir Pro v1.8 - Fixed", layout="wide")
 
 # --- 2. KONEKSI DATABASE ---
 @st.cache_resource
@@ -123,7 +123,7 @@ def cashier_ui():
                 st.rerun()
 
 def admin_ui():
-    st.title("🏗️ Panel Admin v1.8 (Final Fix)")
+    st.title("🏗️ Panel Admin v1.8")
     menu = st.sidebar.selectbox("Menu", ["Dashboard", "Produk", "Add On", "Transaksi"])
     list_kategori = ["Minuman", "Makanan", "Fashion"]
 
@@ -142,29 +142,17 @@ def admin_ui():
                 h = st.number_input("Harga", min_value=0, step=500)
                 s = st.number_input("Stok Awal", min_value=0)
                 
-                # Check Duplikat hanya jika input tidak kosong
                 if n:
                     n_clean = n.strip()
-                    # Cek apakah nama ini SUDAH ADA di tabel yang baru kita tarik dari database
                     if not df_p.empty and n_clean.lower() in df_p['nama_produk'].str.lower().str.strip().values:
                         st.warning(f"⚠️ Nama '{n_clean}' sudah ada di database!")
 
                 if st.form_submit_button("Simpan Produk"):
-                    if not n:
-                        st.error("Nama produk tidak boleh kosong!"); return
-                    
-                    # Cek database sekali lagi sebelum insert
-                    is_dup = con.execute("SELECT COUNT(*) FROM produk WHERE LOWER(TRIM(nama_produk)) = LOWER(?)", [n.strip()]).fetchone()[0]
-                    if is_dup > 0:
-                        st.error(f"Gagal! '{n}' sudah terdaftar."); return
-
+                    if not n: st.error("Nama tidak boleh kosong!"); return
                     nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM produk").fetchone()[0]
-                    # FIX: Explicit Column Names untuk mencegah Binder Error
-                    con.execute("""
-                        INSERT INTO produk (id, nama_produk, kategori, harga, stok) 
-                        VALUES (?, ?, ?, ?, ?)
-                    """, [nid, n.strip(), k, h, s])
-                    st.success("Produk berhasil ditambahkan!"); st.rerun()
+                    con.execute("INSERT INTO produk (id, nama_produk, kategori, harga, stok) VALUES (?, ?, ?, ?, ?)", 
+                                [nid, n.strip(), k, h, s])
+                    st.success("Produk ditambahkan!"); st.rerun()
         
         with t2:
             if not df_p.empty:
@@ -174,7 +162,6 @@ def admin_ui():
                     en = st.text_input("Nama Baru", value=curr['nama_produk'])
                     ek = st.selectbox("Kategori", list_kategori, index=list_kategori.index(curr['kategori']))
                     eh = st.number_input("Harga", value=float(curr['harga']))
-                    
                     if st.form_submit_button("Update Data"):
                         con.execute("UPDATE produk SET nama_produk=?, kategori=?, harga=? WHERE id=?", [en.strip(), ek, eh, int(curr['id'])])
                         st.success("Produk diperbarui!"); st.rerun()
@@ -209,19 +196,39 @@ def admin_ui():
                 kl = st.selectbox("Kategori", list_kategori, key="a_kat")
                 hl = st.number_input("Harga Tambahan", min_value=0, step=500)
                 sl = st.number_input("Stok Awal", min_value=0)
-                
                 if st.form_submit_button("Simpan Add On"):
                     new_id = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM master_label").fetchone()[0]
-                    # FIX: Explicit Column Names
                     con.execute("INSERT INTO master_label (id, nama_label, kategori, harga, stok) VALUES (?,?,?,?,?)", 
                                 [new_id, nl.strip(), kl, hl, sl])
                     st.success("Add On ditambahkan!"); st.rerun()
         
-        # ... (Sisa tab Edit, Stok, Hapus tetap sama dengan logika update ID)
         with t_l2:
             if not df_l.empty:
                 a_target_id = st.selectbox("Pilih Add On (Edit)", df_l['id'].tolist(), format_func=lambda x: f"{df_l[df_l['id']==x]['nama_label'].values[0]}")
-                if st.form_submit_button("Proses Edit (Dummy)"): st.info("Gunakan form update yang tersedia.")
+                old = df_l[df_l['id'] == a_target_id].iloc[0]
+                with st.form("f_edit_a"): # Form ditambahkan di sini untuk memperbaiki error
+                    new_nl = st.text_input("Nama Add On", value=old['nama_label'])
+                    new_kl = st.selectbox("Kategori", list_kategori, index=list_kategori.index(old['kategori']))
+                    new_hl = st.number_input("Harga", value=float(old['harga']))
+                    if st.form_submit_button("Update Add On"):
+                        con.execute("UPDATE master_label SET nama_label=?, kategori=?, harga=? WHERE id=?", [new_nl.strip(), new_kl, new_hl, a_target_id])
+                        st.success("Add On diperbarui!"); st.rerun()
+
+        with t_l3:
+            if not df_l.empty:
+                a_stok_id = st.selectbox("Pilih Add On (Stok)", df_l['id'].tolist(), format_func=lambda x: f"{df_l[df_l['id']==x]['nama_label'].values[0]}")
+                curr_sl = df_l[df_l['id'] == a_stok_id]['stok'].values[0]
+                new_sl = st.number_input("Set Stok Baru", min_value=0, value=int(curr_sl))
+                if st.button("Update Stok Add On"):
+                    con.execute("UPDATE master_label SET stok=? WHERE id=?", [new_sl, a_stok_id])
+                    st.success("Stok diperbarui!"); st.rerun()
+
+        with t_l4:
+            if not df_l.empty:
+                a_del_id = st.selectbox("Pilih Add On (Hapus)", df_l['id'].tolist(), format_func=lambda x: f"{df_l[df_l['id']==x]['nama_label'].values[0]}")
+                if st.button("🔥 Hapus Add On Permanen"):
+                    con.execute("DELETE FROM master_label WHERE id=?", [a_del_id])
+                    st.success("Add On dihapus!"); st.rerun()
 
     elif menu == "Dashboard":
         res_h = con.execute("SELECT SUM(total_harga) FROM transaksi WHERE CAST(waktu AS DATE) = ?", [get_now_wib().strftime('%Y-%m-%d')]).fetchone()
